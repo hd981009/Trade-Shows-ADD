@@ -414,7 +414,7 @@
                     activeTab === 'exhibitions' ? 'bg-blue-600 text-white shadow' : 'text-slate-300 hover:text-white hover:bg-slate-700/50'
                   }`}
                 >
-                  展覽視角 (需求管理)
+                  依展覽 (需求管理)
                 </button>
                 <button
                   onClick={() => setActiveTab('media')}
@@ -422,7 +422,7 @@
                     activeTab === 'media' ? 'bg-blue-600 text-white shadow' : 'text-slate-300 hover:text-white hover:bg-slate-700/50'
                   }`}
                 >
-                  媒體視角 (採購參考)
+                  依媒體 (採購參考)
                 </button>
                 <button
                   onClick={() => setActiveTab('dashboard')}
@@ -495,7 +495,7 @@
 
             {exhibitions.length > 0 && (
               <>
-                {/* 1. 展覽視角 (Exhibition View) */}
+                {/* 1. 依展覽 (Exhibition View) */}
                 {activeTab === 'exhibitions' && (
                   <div className="space-y-6">
                     {/* 多選篩選工具列 */}
@@ -697,7 +697,7 @@
                   </div>
                 )}
 
-                {/* 2. 媒體視角 (Media View - 集購大總額) */}
+                {/* 2. 依媒體 (Media View - 採購參考) */}
                 {activeTab === 'media' && (
                   <div className="space-y-6">
                     {/* 媒體篩選工具列 */}
