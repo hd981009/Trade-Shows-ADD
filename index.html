@@ -23,7 +23,7 @@
   <div id="root"></div>
 
   <script type="text/babel">
-    const { useState, useEffect, useMemo, useRef } = React;
+    const { useState, useEffect, useMemo } = React;
 
     const PRESET_MEDIA_LIST = [
       "工商時報", "經濟日報", "數位時代", "商業周刊", 
@@ -34,13 +34,10 @@
 
     function App() {
       const [exhibitions, setExhibitions] = useState([]);
-      const [activeTab, setActiveTab] = useState('exhibitions'); // 'exhibitions', 'media', 'dashboard'
+      const [activeTab, setActiveTab] = useState('exhibitions'); 
       const [selectedMediaName, setSelectedMediaName] = useState('');
-
-      // 展覽視角：多選篩選狀態（空陣列代表全選）
       const [filteredExhibitionIds, setFilteredExhibitionIds] = useState([]);
 
-      // 新增/編輯展覽 Modal 狀態
       const [isModalOpen, setIsModalOpen] = useState(false);
       const [editingExhibition, setEditingExhibition] = useState(null);
 
@@ -69,7 +66,6 @@
         localStorage.setItem('taitra_media_procurement_data', JSON.stringify(exhibitions));
       }, [exhibitions]);
 
-      // 當展覽列表變動時，若篩選名單為空或有不存在的 ID，則重新全選
       useEffect(() => {
         if (exhibitions.length > 0 && filteredExhibitionIds.length === 0) {
           setFilteredExhibitionIds(exhibitions.map(e => e.id));
@@ -82,10 +78,8 @@
         }
       });
 
-      // 媒體整合資料計算
       const mediaProcurementPool = useMemo(() => {
         const map = {};
-
         exhibitions.forEach(ex => {
           (ex.mediaItems || []).forEach(item => {
             const mediaName = item.name ? item.name.trim() : '';
@@ -141,7 +135,6 @@
         return mediaProcurementPool.find(m => m.mediaName === selectedMediaName) || mediaProcurementPool[0] || null;
       }, [mediaProcurementPool, selectedMediaName]);
 
-      // 展覽表單操作
       const handleOpenModal = (ex = null) => {
         if (ex) {
           setEditingExhibition(ex);
@@ -254,7 +247,6 @@
         setFilteredExhibitionIds([]);
       };
 
-      // 匯入與匯出
       const handleExportJSON = () => {
         const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(exhibitions, null, 2));
         const downloadAnchor = document.createElement('a');
@@ -348,7 +340,6 @@
         }
       };
 
-      // 計算總金額指標
       const overallStats = useMemo(() => {
         let grandExBudget = 0;
         let grandPRBudget = 0;
@@ -363,7 +354,6 @@
         return { grandExBudget, grandPRBudget, grandTotalBudgetLimit };
       }, [exhibitions]);
 
-      // 甘特圖日期計算輔助函數
       const calculateTimelinePosition = (startStr, endStr) => {
         if (!startStr || !endStr) return { left: '0%', width: '100%', isPlaceholder: true };
         const start = new Date(startStr);
@@ -386,6 +376,18 @@
       const displayedExhibitions = useMemo(() => {
         return exhibitions.filter(ex => filteredExhibitionIds.includes(ex.id));
       }, [exhibitions, filteredExhibitionIds]);
+
+      const sortedParticipatingExhibitions = useMemo(() => {
+        if (!currentMediaGroup) return [];
+        return [...currentMediaGroup.participatingExhibitions].sort((a, b) => {
+          const dateA = a.startDate ? new Date(a.startDate).getTime() : Infinity;
+          const dateB = b.startDate ? new Date(b.startDate).getTime() : Infinity;
+          if (dateA !== dateB) return dateA - dateB;
+          const endDateA = a.endDate ? new Date(a.endDate).getTime() : Infinity;
+          const endDateB = b.endDate ? new Date(b.endDate).getTime() : Infinity;
+          return endDateA - endDateB;
+        });
+      }, [currentMediaGroup]);
 
       return (
         <div className="min-h-screen flex flex-col">
@@ -534,7 +536,7 @@
                     {/* 各展覽廣告走期圖表化 (甘特圖) */}
                     <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200 space-y-4">
                       <h3 className="font-bold text-slate-800 text-base flex items-center">
-                        <span className="mr-2">📊</span> 各展覽媒體廣告投放走期甘特圖 (2027全年)
+                        <span className="mr-2">📊</span> 各展覽媒體廣告投放走期甘特圖 (依時間排序)
                       </h3>
 
                       <div className="border border-slate-200 rounded-lg p-4 bg-slate-50/50 space-y-3">
@@ -543,40 +545,54 @@
                         </div>
 
                         <div className="space-y-3">
-                          {displayedExhibitions.map(ex => (
-                            <div key={ex.id} className="space-y-1">
-                              <div className="flex justify-between text-xs font-bold text-slate-700">
-                                <span>{ex.name} <span className="text-[11px] font-normal text-slate-500">({ex.department})</span></span>
-                              </div>
-                              <div className="space-y-1.5">
-                                {(ex.mediaItems || []).map((item, idx) => {
-                                  const pos = calculateTimelinePosition(item.startDate, item.endDate);
-                                  return (
-                                    <div key={idx} className="relative h-6 bg-slate-200/60 rounded flex items-center px-2">
-                                      <span className="text-[11px] font-semibold text-slate-700 z-10 truncate w-1/3">
-                                        {item.name}
-                                      </span>
-                                      <div className="absolute inset-y-1 right-2 left-1/3 bg-slate-100 rounded overflow-hidden">
-                                        {!pos.isPlaceholder ? (
-                                          <div
-                                            className="absolute top-0 bottom-0 bg-blue-600/80 rounded flex items-center justify-center text-[10px] text-white font-mono shadow-sm"
-                                            style={{ left: pos.left, width: pos.width }}
-                                            title={`${item.startDate} ~ ${item.endDate}`}
-                                          >
-                                            {item.startDate} ~ {item.endDate}
-                                          </div>
-                                        ) : (
-                                          <div className="w-full h-full flex items-center justify-center text-[10px] text-slate-400">
-                                            未設定走期
-                                          </div>
-                                        )}
+                          {displayedExhibitions.map(ex => {
+                            const sortedMediaItems = [...(ex.mediaItems || [])].sort((a, b) => {
+                              const dateA = a.startDate ? new Date(a.startDate).getTime() : Infinity;
+                              const dateB = b.startDate ? new Date(b.startDate).getTime() : Infinity;
+                              if (dateA !== dateB) return dateA - dateB;
+                              const endDateA = a.endDate ? new Date(a.endDate).getTime() : Infinity;
+                              const endDateB = b.endDate ? new Date(b.endDate).getTime() : Infinity;
+                              if (endDateA !== endDateB) return endDateA - endDateB;
+                              return a.name.localeCompare(b.name, 'zh-TW');
+                            });
+
+                            return (
+                              <div key={ex.id} className="space-y-1">
+                                <div className="flex justify-between text-xs font-bold text-slate-700">
+                                  <span>{ex.name} <span className="text-[11px] font-normal text-slate-500">({ex.department})</span></span>
+                                </div>
+                                <div className="space-y-1.5">
+                                  {sortedMediaItems.map((item, idx) => {
+                                    const pos = calculateTimelinePosition(item.startDate, item.endDate);
+                                    return (
+                                      <div key={idx} className="relative h-7 bg-slate-200/60 rounded flex items-center px-2">
+                                        <span className="text-[11px] font-semibold text-slate-700 z-10 truncate w-1/3">
+                                          {item.name}
+                                        </span>
+                                        <div className="absolute inset-y-1 right-2 left-1/3 bg-slate-100 rounded overflow-hidden">
+                                          {!pos.isPlaceholder ? (
+                                            <div
+                                              className="group relative h-full bg-blue-600/85 hover:bg-blue-500 rounded transition-colors cursor-pointer shadow-sm"
+                                              style={{ left: pos.left, width: pos.width }}
+                                            >
+                                              <div className="opacity-0 group-hover:opacity-100 pointer-events-none absolute bottom-full left-1/2 -translate-x-1/2 mb-2 px-3 py-1.5 bg-slate-900 text-white text-[11px] rounded-md whitespace-nowrap shadow-xl z-30 transition-opacity">
+                                                <div className="font-bold border-b border-slate-700 pb-0.5 mb-0.5">{item.name}</div>
+                                                <div>{item.startDate || '未定'} ~ {item.endDate || '未定'}</div>
+                                              </div>
+                                            </div>
+                                          ) : (
+                                            <div className="w-full h-full flex items-center justify-center text-[10px] text-slate-400">
+                                              未設定走期
+                                            </div>
+                                          )}
+                                        </div>
                                       </div>
-                                    </div>
-                                  );
-                                })}
+                                    );
+                                  })}
+                                </div>
                               </div>
-                            </div>
-                          ))}
+                            );
+                          })}
                           {displayedExhibitions.length === 0 && (
                             <div className="text-center py-6 text-slate-400 text-xs">
                               未勾選任何展覽或尚無資料
@@ -615,26 +631,28 @@
 
                             <div className="p-6 grid grid-cols-1 lg:grid-cols-3 gap-6">
                               <div className="space-y-4 lg:col-span-1 border-b lg:border-b-0 lg:border-r border-slate-100 pb-4 lg:pb-0 lg:pr-6">
-                                <div>
-                                  <span className="text-xs text-slate-500 block">展覽處規劃總預算上限</span>
-                                  <span className="text-xl font-bold text-slate-800">
+                                <div className="flex items-baseline justify-between flex-wrap gap-1">
+                                  <span className="text-sm font-semibold text-slate-600">預算上限：</span>
+                                  <span className="text-2xl font-extrabold text-slate-900">
                                     NT$ {maxBudget.toLocaleString()}
                                   </span>
                                 </div>
-                                <div className="p-3 bg-slate-50 rounded-lg space-y-1 text-xs border border-slate-100">
-                                  <div className="flex justify-between">
-                                    <span className="text-slate-600">展覽處欲投放加總:</span>
-                                    <span className="font-semibold">NT$ {totalExAllocated.toLocaleString()}</span>
+
+                                <div className="p-4 bg-slate-50 rounded-xl space-y-2 border border-slate-200/70">
+                                  <div className="flex justify-between items-center text-sm">
+                                    <span className="text-slate-700 font-medium">展覽處欲投放加總：</span>
+                                    <span className="font-bold text-slate-900 text-base">NT$ {totalExAllocated.toLocaleString()}</span>
                                   </div>
-                                  <div className="flex justify-between">
-                                    <span className="text-slate-600">公關組建議加總:</span>
-                                    <span className={`font-bold ${isOverBudget ? 'text-rose-600' : 'text-emerald-600'}`}>
+                                  <div className="flex justify-between items-center text-sm pt-1 border-t border-slate-200/60">
+                                    <span className="text-slate-700 font-medium">公關組建議加總：</span>
+                                    <span className={`font-extrabold text-lg ${isOverBudget ? 'text-rose-600' : 'text-emerald-600'}`}>
                                       NT$ {totalPRAllocated.toLocaleString()}
                                     </span>
                                   </div>
                                 </div>
+
                                 {isOverBudget && (
-                                  <div className="p-2.5 bg-rose-50 border border-rose-200 rounded-lg text-xs text-rose-700">
+                                  <div className="p-3 bg-rose-50 border border-rose-200 rounded-lg text-xs text-rose-700">
                                     <span className="font-bold">⚠️ 超出預算上限：</span> NT$ {(totalPRAllocated - maxBudget).toLocaleString()}
                                   </div>
                                 )}
@@ -703,6 +721,9 @@
                         {/* 左側：媒體集購大總額卡片 */}
                         <div className="lg:col-span-1 space-y-6">
                           <div className="bg-gradient-to-br from-slate-900 to-slate-800 text-white p-6 rounded-xl shadow-md space-y-4">
+                            <span className="text-xs font-semibold text-blue-400 uppercase">
+                              跨展集購談判池 (Consolidated Procurement)
+                            </span>
                             <h2 className="text-2xl font-bold text-white border-b border-slate-700 pb-3">
                               {currentMediaGroup.mediaName}
                             </h2>
@@ -736,7 +757,7 @@
                           {/* 各媒體廣告走期圖表化 */}
                           <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200 space-y-4">
                             <h4 className="font-bold text-slate-800 text-sm flex items-center">
-                              <span className="mr-2">📈</span> {currentMediaGroup.mediaName} - 各展投放走期對照圖
+                              <span className="mr-2">📈</span> {currentMediaGroup.mediaName} - 各展投放走期對照圖 (依時間排序)
                             </h4>
 
                             <div className="border border-slate-200 rounded-lg p-4 bg-slate-50/50 space-y-3">
@@ -744,21 +765,24 @@
                                 <span>01月</span><span>03月</span><span>05月</span><span>07月</span><span>09月</span><span>11月</span><span>12月</span>
                               </div>
                               <div className="space-y-2">
-                                {currentMediaGroup.participatingExhibitions.map((item, idx) => {
+                                {sortedParticipatingExhibitions.map((item, idx) => {
                                   const pos = calculateTimelinePosition(item.startDate, item.endDate);
                                   return (
                                     <div key={idx} className="space-y-1">
                                       <div className="flex justify-between text-xs font-bold text-slate-700">
                                         <span>{item.exhibitionName} <span className="text-[10px] font-normal text-slate-500">({item.department})</span></span>
                                       </div>
-                                      <div className="relative h-6 bg-slate-100 rounded flex items-center px-2 border border-slate-200">
+                                      <div className="relative h-7 bg-slate-100 rounded flex items-center px-2 border border-slate-200">
                                         <div className="absolute inset-y-1 right-2 left-2 overflow-hidden">
                                           {!pos.isPlaceholder ? (
                                             <div
-                                              className="absolute top-0 bottom-0 bg-blue-600/80 rounded flex items-center justify-center text-[10px] text-white font-mono shadow-sm"
+                                              className="group relative h-full bg-blue-600/85 hover:bg-blue-500 rounded transition-colors cursor-pointer shadow-sm"
                                               style={{ left: pos.left, width: pos.width }}
                                             >
-                                              {item.startDate} ~ {item.endDate}
+                                              <div className="opacity-0 group-hover:opacity-100 pointer-events-none absolute bottom-full left-1/2 -translate-x-1/2 mb-2 px-3 py-1.5 bg-slate-900 text-white text-[11px] rounded-md whitespace-nowrap shadow-xl z-30 transition-opacity">
+                                                <div className="font-bold border-b border-slate-700 pb-0.5 mb-0.5">{item.exhibitionName}</div>
+                                                <div>{item.startDate || '未定'} ~ {item.endDate || '未定'}</div>
+                                              </div>
                                             </div>
                                           ) : (
                                             <div className="w-full h-full flex items-center justify-center text-[10px] text-slate-400">
@@ -793,7 +817,7 @@
                                   </tr>
                                 </thead>
                                 <tbody className="divide-y divide-slate-200">
-                                  {currentMediaGroup.participatingExhibitions.map((item, idx) => (
+                                  {sortedParticipatingExhibitions.map((item, idx) => (
                                     <tr key={idx} className="hover:bg-slate-50">
                                       <td className="px-4 py-3 font-semibold text-slate-800">{item.exhibitionName}</td>
                                       <td className="px-4 py-3 text-xs">
@@ -852,54 +876,6 @@
                         <div className="text-2xl font-bold text-emerald-600 mt-1">
                           NT$ {overallStats.grandPRBudget.toLocaleString()}
                         </div>
-                      </div>
-                    </div>
-
-                    {/* 柱狀圖：各展預算比較視覺化 */}
-                    <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200 space-y-4">
-                      <h3 className="font-bold text-slate-800 text-base flex items-center">
-                        <span className="mr-2">📊</span> 各展覽預算上限與媒體需求對比
-                      </h3>
-
-                      <div className="space-y-4 pt-2">
-                        {exhibitions.map(ex => {
-                          const totalEx = (ex.mediaItems || []).reduce((sum, i) => sum + (Number(i.exBudget) || 0), 0);
-                          const totalPR = (ex.mediaItems || []).reduce((sum, i) => sum + (Number(i.prBudget) || 0), 0);
-                          const limit = ex.totalBudget || 1;
-                          const percentEx = Math.min(Math.round((totalEx / limit) * 100), 100);
-                          const percentPR = Math.min(Math.round((totalPR / limit) * 100), 100);
-
-                          return (
-                            <div key={ex.id} className="p-4 bg-slate-50 rounded-xl border border-slate-200 space-y-2">
-                              <div className="flex justify-between items-center text-sm font-bold text-slate-800">
-                                <span>{ex.name} <span className="text-xs font-normal text-slate-500">({ex.department})</span></span>
-                                <span className="text-xs bg-indigo-50 text-indigo-700 px-2 py-0.5 rounded">上限: NT$ {limit.toLocaleString()}</span>
-                              </div>
-
-                              <div className="space-y-1.5 text-xs">
-                                <div>
-                                  <div className="flex justify-between text-slate-600 mb-0.5">
-                                    <span>展覽處欲投放加總 (NT$ {totalEx.toLocaleString()})</span>
-                                    <span>{percentEx}%</span>
-                                  </div>
-                                  <div className="w-full bg-slate-200 h-2 rounded-full overflow-hidden">
-                                    <div className="bg-blue-600 h-full rounded-full" style={{ width: `${percentEx}%` }}></div>
-                                  </div>
-                                </div>
-
-                                <div>
-                                  <div className="flex justify-between text-slate-600 mb-0.5">
-                                    <span>公關組建議加總 (NT$ {totalPR.toLocaleString()})</span>
-                                    <span>{percentPR}%</span>
-                                  </div>
-                                  <div className="w-full bg-slate-200 h-2 rounded-full overflow-hidden">
-                                    <div className="bg-emerald-600 h-full rounded-full" style={{ width: `${percentPR}%` }}></div>
-                                  </div>
-                                </div>
-                              </div>
-                            </div>
-                          );
-                        })}
                       </div>
                     </div>
 
