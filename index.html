@@ -124,7 +124,8 @@
           });
         });
 
-        return Object.values(map).sort((a, b) => b.totalExhibitionBudget - a.totalExhibitionBudget);
+        // 排序改以公關建議總額 (totalPRRecommended) 為基準
+        return Object.values(map).sort((a, b) => b.totalPRRecommended - a.totalPRRecommended);
       }, [exhibitions]);
 
       useEffect(() => {
@@ -286,11 +287,11 @@
           return;
         }
         let csvContent = "data:text/csv;charset=utf-8,\uFEFF";
-        csvContent += "媒體名稱,意向展覽數,展覽處需求總金額,公關組建議總金額,參與展覽明細\n";
+        csvContent += "媒體名稱,意向展覽數,公關組建議規劃總金額,展覽處原預算總金額,參與展覽明細\n";
 
         mediaProcurementPool.forEach(m => {
           const exList = m.participatingExhibitions.map(e => `${e.exhibitionName}(${e.department})`).join('; ');
-          csvContent += `"${m.mediaName}",${m.exhibitionsCount},${m.totalExhibitionBudget},${m.totalPRRecommended},"${exList}"\n`;
+          csvContent += `"${m.mediaName}",${m.exhibitionsCount},${m.totalPRRecommended},${m.totalExhibitionBudget},"${exList}"\n`;
         });
 
         const encodedUri = encodeURI(csvContent);
@@ -402,7 +403,7 @@
                 </div>
                 <div>
                   <h1 className="text-lg font-bold leading-tight">外貿協會公關組</h1>
-                  <p className="text-xs text-slate-400">跨展覽媒體採購與預算整合管理系統</p>
+                  <p className="text-xs text-slate-400">媒體採購與預算整合管理系統</p>
                 </div>
               </div>
 
@@ -538,7 +539,7 @@
                     {/* 各展覽廣告走期圖表化 (甘特圖) */}
                     <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200 space-y-4">
                       <h3 className="font-bold text-slate-800 text-base flex items-center">
-                        <span className="mr-2">📊</span> 各展覽媒體廣告投放走期
+                        <span className="mr-2">📊</span> 廣告走期
                       </h3>
 
                       <div className="border border-slate-200 rounded-lg p-4 bg-slate-50/50 space-y-3">
@@ -711,7 +712,7 @@
                         >
                           {mediaProcurementPool.map(m => (
                             <option key={m.mediaName} value={m.mediaName}>
-                              {m.mediaName} (共 {m.exhibitionsCount} 展，總額 NT$ {m.totalExhibitionBudget.toLocaleString()})
+                              {m.mediaName} (共 {m.exhibitionsCount} 展，規劃總額 NT$ {m.totalPRRecommended.toLocaleString()})
                             </option>
                           ))}
                         </select>
@@ -723,28 +724,25 @@
                         {/* 左側：媒體集購大總額卡片 */}
                         <div className="lg:col-span-1 space-y-6">
                           <div className="bg-gradient-to-br from-slate-900 to-slate-800 text-white p-6 rounded-xl shadow-md space-y-4">
+                            <span className="text-xs font-semibold text-blue-400 uppercase">
+                              跨展集購談判池 (Consolidated Procurement)
+                            </span>
                             <h2 className="text-2xl font-bold text-white border-b border-slate-700 pb-3">
                               {currentMediaGroup.mediaName}
                             </h2>
 
-                            <div className="space-y-3 pt-1">
+                            <div className="space-y-4 pt-1">
                               <div>
-                                <span className="text-xs text-slate-400 block">各展彙整欲投放總金額</span>
+                                <span className="text-xs text-slate-400 block mb-1">規劃投放總金額 (公關組建議加總)</span>
                                 <span className="text-3xl font-extrabold text-blue-400">
-                                  NT$ {currentMediaGroup.totalExhibitionBudget.toLocaleString()}
+                                  NT$ {currentMediaGroup.totalPRRecommended.toLocaleString()}
                                 </span>
                               </div>
 
-                              <div className="grid grid-cols-2 gap-2 pt-2 text-xs">
-                                <div className="bg-slate-800/80 p-2.5 rounded border border-slate-700">
-                                  <span className="text-slate-400 block">意向投放展覽</span>
+                              <div className="pt-2 text-xs">
+                                <div className="bg-slate-800/80 p-3 rounded-lg border border-slate-700 flex justify-between items-center">
+                                  <span className="text-slate-400">意向投放展覽數</span>
                                   <span className="text-lg font-bold text-white">{currentMediaGroup.exhibitionsCount} 個展覽</span>
-                                </div>
-                                <div className="bg-slate-800/80 p-2.5 rounded border border-slate-700">
-                                  <span className="text-slate-400 block">公關建議總額</span>
-                                  <span className="text-lg font-bold text-emerald-400">
-                                    NT$ {currentMediaGroup.totalPRRecommended.toLocaleString()}
-                                  </span>
                                 </div>
                               </div>
                             </div>
@@ -756,7 +754,7 @@
                           {/* 各媒體廣告走期圖表化 */}
                           <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200 space-y-4">
                             <h4 className="font-bold text-slate-800 text-sm flex items-center">
-                              <span className="mr-2">📈</span> {currentMediaGroup.mediaName} - 各展投放走期對照圖 (依時間排序)
+                              <span className="mr-2">📈</span> {currentMediaGroup.mediaName} - 廣告走期對照圖 (依時間排序)
                             </h4>
 
                             <div className="border border-slate-200 rounded-lg p-4 bg-slate-50/50 space-y-3">
@@ -811,7 +809,7 @@
                                     <th className="px-4 py-3">展覽名稱</th>
                                     <th className="px-4 py-3">承辦單位</th>
                                     <th className="px-4 py-3 text-right">展覽處預算</th>
-                                    <th className="px-4 py-3 text-right">公關組建議</th>
+                                    <th className="px-4 py-3 text-right">公關組建議 (議價基準)</th>
                                     <th className="px-4 py-3">預定走期</th>
                                   </tr>
                                 </thead>
@@ -822,7 +820,7 @@
                                       <td className="px-4 py-3 text-xs">
                                         <span className="bg-slate-100 px-2 py-0.5 rounded border border-slate-200">{item.department}</span>
                                       </td>
-                                      <td className="px-4 py-3 text-right font-medium">NT$ {item.exBudget.toLocaleString()}</td>
+                                      <td className="px-4 py-3 text-right font-medium text-slate-500">NT$ {item.exBudget.toLocaleString()}</td>
                                       <td className="px-4 py-3 text-right font-bold text-blue-600">NT$ {item.prBudget.toLocaleString()}</td>
                                       <td className="px-4 py-3 text-xs text-slate-500 whitespace-nowrap">
                                         {item.startDate || item.endDate ? `${item.startDate || '未定'} ~ ${item.endDate || '未定'}` : '未定'}
@@ -881,13 +879,13 @@
                     {/* 媒體採購熱門排行榜 */}
                     <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200">
                       <h3 className="font-bold text-slate-800 text-base mb-4 flex items-center">
-                        <span className="mr-2">🏆</span> 國內媒體廣宣排行
+                        <span className="mr-2">🏆</span> 全館展覽媒體需求熱門排行榜 (依公關組建議總額)
                       </h3>
 
                       <div className="space-y-4">
                         {mediaProcurementPool.map((m, index) => {
-                          const maxAmount = mediaProcurementPool[0]?.totalExhibitionBudget || 1;
-                          const percentage = Math.round((m.totalExhibitionBudget / maxAmount) * 100);
+                          const maxAmount = mediaProcurementPool[0]?.totalPRRecommended || 1;
+                          const percentage = Math.round((m.totalPRRecommended / maxAmount) * 100);
 
                           return (
                             <div key={m.mediaName} className="space-y-1.5">
@@ -904,7 +902,7 @@
                                   <span className="text-xs text-slate-400">({m.exhibitionsCount} 個展覽選擇)</span>
                                 </div>
                                 <div className="font-bold text-slate-700">
-                                  NT$ {m.totalExhibitionBudget.toLocaleString()}
+                                  NT$ {m.totalPRRecommended.toLocaleString()}
                                 </div>
                               </div>
                               <div className="w-full bg-slate-100 h-2.5 rounded-full overflow-hidden">
