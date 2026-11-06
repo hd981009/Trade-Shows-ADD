@@ -1,0 +1,1016 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>外貿協會 TAITRA | 跨展覽媒體廣告採購與預算整合管理系統</title>
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- React & ReactDOM -->
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+  <!-- Babel for JSX -->
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <!-- FontAwesome Icons -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            taitra: {
+              50: '#f0f7ff',
+              100: '#e0effe',
+              500: '#005bac', // TAITRA Corporate Blue
+              600: '#00498c',
+              700: '#00376b',
+              800: '#00274d',
+              900: '#001934',
+            }
+          }
+        }
+      }
+    }
+  </script>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@300;400;500;600;700&display=swap');
+    body {
+      font-family: 'Noto Sans TC', sans-serif;
+      background-color: #f8fafc;
+    }
+    ::-webkit-scrollbar { width: 6px; height: 6px; }
+    ::-webkit-scrollbar-track { background: #f1f5f9; }
+    ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 3px; }
+    ::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+  </style>
+</head>
+<body class="text-slate-800 antialiased selection:bg-taitra-500 selection:text-white">
+  <div id="root"></div>
+
+  <script type="text/babel">
+    const { useState, useEffect, useMemo } = React;
+
+    // 格式化金額顯示
+    const formatCurrency = (val) => {
+      return new Intl.NumberFormat('zh-TW', { style: 'currency', currency: 'TWD', maximumFractionDigits: 0 }).format(val || 0);
+    };
+
+    // 測試用範例資料
+    const sampleExhibitions = [
+      {
+        id: "ex-1",
+        name: "COMPUTEX TAIPEI 2025",
+        department: "展覽業務處 一組",
+        totalBudget: 4500000,
+        contactPerson: "張專員",
+        notes: "重點發展 AI PC 與前瞻科技，需強打科技與財經大報。",
+        mediaItems: [
+          { mediaName: "工商時報", cost: 1200000, startDate: "2025-04-15", endDate: "2025-06-05" },
+          { mediaName: "經濟日報", cost: 1300000, startDate: "2025-04-15", endDate: "2025-06-05" },
+          { mediaName: "數位時代", cost: 800000, startDate: "2025-05-01", endDate: "2025-06-07" },
+          { mediaName: "TechCrunch", cost: 1200000, startDate: "2025-05-10", endDate: "2025-06-02" }
+        ]
+      },
+      {
+        id: "ex-2",
+        name: "TAISPO 台灣國際運動及健身展",
+        department: "展覽業務處 二組",
+        totalBudget: 1800000,
+        contactPerson: "林經理",
+        notes: "主打智慧健身與戶外樂活。",
+        mediaItems: [
+          { mediaName: "工商時報", cost: 500000, startDate: "2025-02-10", endDate: "2025-03-30" },
+          { mediaName: "數位時代", cost: 600000, startDate: "2025-02-15", endDate: "2025-03-28" },
+          { mediaName: "戶外樂活網", cost: 400000, startDate: "2025-03-01", endDate: "2025-03-29" }
+        ]
+      }
+    ];
+
+    function App() {
+      // 預設採用空陣列（亦會嘗試自 LocalStorage 讀取歷史資料）
+      const [exhibitions, setExhibitions] = useState(() => {
+        const saved = localStorage.getItem('taitra_media_exhibitions');
+        return saved ? JSON.parse(saved) : [];
+      });
+
+      const [activeTab, setActiveTab] = useState('exhibitions'); // 'exhibitions', 'media', 'dashboard'
+      
+      // 搜尋與篩選狀態
+      const [searchTerm, setSearchTerm] = useState('');
+      const [selectedDept, setSelectedDept] = useState('ALL');
+
+      // 下拉選單切換單一展覽 / 媒體
+      const [selectedExId, setSelectedExId] = useState('ALL');
+      const [selectedMediaName, setSelectedMediaName] = useState('ALL');
+
+      // Modal 表單彈窗狀態
+      const [isModalOpen, setIsModalOpen] = useState(false);
+      const [editingExhibition, setEditingExhibition] = useState(null);
+      const [formData, setFormData] = useState({
+        name: '',
+        department: '展覽業務處 一組',
+        totalBudget: '',
+        contactPerson: '',
+        notes: '',
+        mediaItems: []
+      });
+
+      // 自動同步資料至 LocalStorage
+      useEffect(() => {
+        localStorage.setItem('taitra_media_exhibitions', JSON.stringify(exhibitions));
+      }, [exhibitions]);
+
+      // 媒體歸納集中計算 (Media Consolidation Pool)
+      const mediaConsolidation = useMemo(() => {
+        const map = {};
+        exhibitions.forEach(ex => {
+          (ex.mediaItems || []).forEach(item => {
+            const mName = (item.mediaName || '').trim();
+            if (!mName) return;
+
+            if (!map[mName]) {
+              map[mName] = {
+                mediaName: mName,
+                totalPooledBudget: 0,
+                exhibitionsList: [],
+                minDate: item.startDate || '',
+                maxDate: item.endDate || ''
+              };
+            }
+            map[mName].totalPooledBudget += Number(item.cost || 0);
+            map[mName].exhibitionsList.push({
+              exhibitionId: ex.id,
+              exhibitionName: ex.name,
+              department: ex.department,
+              cost: Number(item.cost || 0),
+              startDate: item.startDate,
+              endDate: item.endDate
+            });
+
+            if (item.startDate && (!map[mName].minDate || item.startDate < map[mName].minDate)) {
+              map[mName].minDate = item.startDate;
+            }
+            if (item.endDate && (!map[mName].maxDate || item.endDate > map[mName].maxDate)) {
+              map[mName].maxDate = item.endDate;
+            }
+          });
+        });
+
+        return Object.values(map).map(m => ({
+          ...m,
+          exhibitionsCount: m.exhibitionsList.length
+        })).sort((a, b) => b.totalPooledBudget - a.totalPooledBudget);
+      }, [exhibitions]);
+
+      // 總體 KPI 數據
+      const stats = useMemo(() => {
+        const totalBudgetSum = exhibitions.reduce((acc, curr) => acc + Number(curr.totalBudget || 0), 0);
+        const totalAllocatedMediaBudget = exhibitions.reduce((acc, curr) => {
+          return acc + (curr.mediaItems || []).reduce((mAcc, m) => mAcc + Number(m.cost || 0), 0);
+        }, 0);
+        return {
+          totalExhibitions: exhibitions.length,
+          totalMediaTypes: mediaConsolidation.length,
+          totalBudgetSum,
+          totalAllocatedMediaBudget,
+          remainingBudget: totalBudgetSum - totalAllocatedMediaBudget
+        };
+      }, [exhibitions, mediaConsolidation]);
+
+      // 開啟新增/編輯視窗
+      const openModal = (ex = null) => {
+        if (ex) {
+          setEditingExhibition(ex.id);
+          setFormData(JSON.parse(JSON.stringify(ex)));
+        } else {
+          setEditingExhibition(null);
+          setFormData({
+            name: '',
+            department: '展覽業務處 一組',
+            totalBudget: '',
+            contactPerson: '',
+            notes: '',
+            mediaItems: [
+              { mediaName: '', cost: '', startDate: '', endDate: '' }
+            ]
+          });
+        }
+        setIsModalOpen(true);
+      };
+
+      // 儲存展覽表單
+      const handleFormSubmit = (e) => {
+        e.preventDefault();
+        if (!formData.name) return;
+
+        const cleanMediaItems = formData.mediaItems.filter(m => m.mediaName.trim() !== '');
+
+        if (editingExhibition) {
+          setExhibitions(prev => prev.map(item => item.id === editingExhibition ? { ...formData, mediaItems: cleanMediaItems, id: editingExhibition } : item));
+        } else {
+          const newEx = { ...formData, mediaItems: cleanMediaItems, id: `ex-${Date.now()}` };
+          setExhibitions(prev => [...prev, newEx]);
+        }
+        setIsModalOpen(false);
+      };
+
+      const handleAddMediaRow = () => {
+        setFormData(prev => ({
+          ...prev,
+          mediaItems: [...prev.mediaItems, { mediaName: '', cost: '', startDate: '', endDate: '' }]
+        }));
+      };
+
+      const handleRemoveMediaRow = (index) => {
+        setFormData(prev => ({
+          ...prev,
+          mediaItems: prev.mediaItems.filter((_, i) => i !== index)
+        }));
+      };
+
+      const handleMediaChange = (index, field, value) => {
+        const updated = [...formData.mediaItems];
+        updated[index][field] = value;
+        setFormData(prev => ({ ...prev, mediaItems: updated }));
+      };
+
+      const handleDeleteExhibition = (id) => {
+        if (window.confirm("確定要刪除此展覽的需求資料嗎？")) {
+          setExhibitions(prev => prev.filter(e => e.id !== id));
+          if (selectedExId === id) setSelectedExId('ALL');
+        }
+      };
+
+      const handleClearAll = () => {
+        if (window.confirm("確定要清空所有展覽與媒體需求資料嗎？清空後不可復原。")) {
+          setExhibitions([]);
+          localStorage.removeItem('taitra_media_exhibitions');
+          setSelectedExId('ALL');
+          setSelectedMediaName('ALL');
+        }
+      };
+
+      const handleLoadSample = () => {
+        if (exhibitions.length > 0 && !window.confirm("載入範例資料將覆蓋當前資料，確定要繼續嗎？")) {
+          return;
+        }
+        setExhibitions(sampleExhibitions);
+      };
+
+      // CSV 匯出功能
+      const exportCSV = (type) => {
+        let csvContent = "data:text/csv;charset=utf-8,\uFEFF";
+        
+        if (type === 'exhibition') {
+          csvContent += "展覽名稱,承辦單位,展覽總預算,媒體名稱,擬投放金額,走期開始,走期結束\n";
+          exhibitions.forEach(ex => {
+            if ((ex.mediaItems || []).length === 0) {
+              csvContent += `"${ex.name}","${ex.department}",${ex.totalBudget},"無",0,"",""\n`;
+            } else {
+              ex.mediaItems.forEach(m => {
+                csvContent += `"${ex.name}","${ex.department}",${ex.totalBudget},"${m.mediaName}",${m.cost},"${m.startDate || ''}","${m.endDate || ''}"\n`;
+              });
+            }
+          });
+        } else {
+          csvContent += "媒體名稱,匯集總預算(TWD),跨展數量,最早走期,最晚走期,參與展覽與預算清單\n";
+          mediaConsolidation.forEach(m => {
+            const exListStr = m.exhibitionsList.map(e => `${e.exhibitionName}($${e.cost})`).join('; ');
+            csvContent += `"${m.mediaName}",${m.totalPooledBudget},${m.exhibitionsCount},"${m.minDate || ''}","${m.maxDate || ''}","${exListStr}"\n`;
+          });
+        }
+
+        const encodedUri = encodeURI(csvContent);
+        const link = document.createElement("a");
+        link.setAttribute("href", encodedUri);
+        link.setAttribute("download", `TAITRA_PR_Report_${type}_${new Date().toISOString().slice(0,10)}.csv`);
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+      };
+
+      // 篩選展覽列表
+      const filteredExhibitions = exhibitions.filter(ex => {
+        const matchesSearch = ex.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+          (ex.mediaItems || []).some(m => m.mediaName.toLowerCase().includes(searchTerm.toLowerCase()));
+        const matchesDept = selectedDept === 'ALL' || ex.department === selectedDept;
+        const matchesSelect = selectedExId === 'ALL' || ex.id === selectedExId;
+        return matchesSearch && matchesDept && matchesSelect;
+      });
+
+      // 篩選媒體池
+      const filteredMedia = mediaConsolidation.filter(m => {
+        const matchesSearch = m.mediaName.toLowerCase().includes(searchTerm.toLowerCase()) ||
+          m.exhibitionsList.some(e => e.exhibitionName.toLowerCase().includes(searchTerm.toLowerCase()));
+        const matchesSelect = selectedMediaName === 'ALL' || m.mediaName === selectedMediaName;
+        return matchesSearch && matchesSelect;
+      });
+
+      return (
+        <div class="min-h-screen flex flex-col bg-slate-50">
+          
+          {/* HEADER NAV BAR */}
+          <header class="bg-taitra-900 text-white shadow-md sticky top-0 z-30">
+            <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+              <div class="flex items-center justify-between h-16">
+                
+                {/* Brand */}
+                <div class="flex items-center space-x-3 cursor-pointer" onClick={() => setActiveTab('exhibitions')}>
+                  <div class="bg-taitra-500 p-2 rounded-lg text-white font-bold text-xl flex items-center justify-center w-10 h-10 shadow">
+                    <i class="fa-solid fa-bullhorn me-0.5"></i>
+                  </div>
+                  <div>
+                    <h1 class="font-bold text-lg leading-tight tracking-wide">外貿協會 TAITRA</h1>
+                    <p class="text-xs text-taitra-100 font-light">跨展覽媒體廣告採購與預算整合管理系統</p>
+                  </div>
+                </div>
+
+                {/* Main Navigation Tabs */}
+                <nav class="hidden md:flex space-x-2">
+                  <button 
+                    onClick={() => setActiveTab('exhibitions')}
+                    class={`px-4 py-2 rounded-lg text-sm font-semibold transition flex items-center ${activeTab === 'exhibitions' ? 'bg-taitra-500 text-white shadow' : 'text-slate-300 hover:bg-taitra-800'}`}
+                  >
+                    <i class="fa-solid fa-rectangle-list mr-2"></i>展覽總覽與需求管理
+                  </button>
+
+                  <button 
+                    onClick={() => setActiveTab('media')}
+                    class={`px-4 py-2 rounded-lg text-sm font-semibold transition flex items-center ${activeTab === 'media' ? 'bg-taitra-500 text-white shadow' : 'text-slate-300 hover:bg-taitra-800'}`}
+                  >
+                    <i class="fa-solid fa-layer-group mr-2"></i>媒體整合與採購池
+                  </button>
+
+                  <button 
+                    onClick={() => setActiveTab('dashboard')}
+                    class={`px-4 py-2 rounded-lg text-sm font-semibold transition flex items-center ${activeTab === 'dashboard' ? 'bg-taitra-500 text-white shadow' : 'text-slate-300 hover:bg-taitra-800'}`}
+                  >
+                    <i class="fa-solid fa-chart-pie mr-2"></i>總體數據儀表板
+                  </button>
+                </nav>
+
+                {/* Actions */}
+                <div class="flex items-center space-x-2">
+                  <button 
+                    onClick={() => openModal()}
+                    class="bg-emerald-600 hover:bg-emerald-500 text-white px-3 py-1.5 rounded-lg text-xs font-semibold shadow flex items-center transition"
+                  >
+                    <i class="fa-solid fa-plus mr-1.5"></i>新增展覽需求
+                  </button>
+                  <button 
+                    onClick={() => exportCSV(activeTab === 'media' ? 'media' : 'exhibition')}
+                    title="匯出 CSV 報表"
+                    class="bg-taitra-800 hover:bg-taitra-700 text-slate-200 px-3 py-1.5 rounded-lg text-xs font-medium border border-taitra-700 transition flex items-center"
+                  >
+                    <i class="fa-solid fa-file-csv mr-1.5 text-emerald-400"></i>匯出 CSV
+                  </button>
+                </div>
+
+              </div>
+            </div>
+
+            {/* Mobile Tab Nav */}
+            <div class="md:hidden flex border-t border-taitra-800 bg-taitra-900 px-2 py-1.5 space-x-1 overflow-x-auto">
+              <button onClick={() => setActiveTab('exhibitions')} class={`px-3 py-1 rounded text-xs font-medium whitespace-nowrap ${activeTab === 'exhibitions' ? 'bg-taitra-500 text-white' : 'text-slate-300'}`}>
+                展覽總覽與需求管理
+              </button>
+              <button onClick={() => setActiveTab('media')} class={`px-3 py-1 rounded text-xs font-medium whitespace-nowrap ${activeTab === 'media' ? 'bg-taitra-500 text-white' : 'text-slate-300'}`}>
+                媒體整合與採購池
+              </button>
+              <button onClick={() => setActiveTab('dashboard')} class={`px-3 py-1 rounded text-xs font-medium whitespace-nowrap ${activeTab === 'dashboard' ? 'bg-taitra-500 text-white' : 'text-slate-300'}`}>
+                總體數據儀表板
+              </button>
+            </div>
+          </header>
+
+          {/* MAIN CONTAINER */}
+          <main class="flex-grow max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6 space-y-6">
+
+            {/* TAB 1: 展覽總覽與需求管理 (EXHIBITION VIEW) */}
+            {activeTab === 'exhibitions' && (
+              <div class="space-y-6">
+                
+                {/* EXHIBITION FILTER & SELECTOR BAR */}
+                <div class="bg-white p-4 rounded-xl shadow-sm border border-slate-200 flex flex-col md:flex-row gap-4 items-center justify-between">
+                  
+                  {/* Select Specific Exhibition */}
+                  <div class="flex items-center space-x-2 w-full md:w-auto">
+                    <label class="text-xs font-bold text-slate-600 whitespace-nowrap flex items-center">
+                      <i class="fa-solid fa-filter text-taitra-500 mr-1.5"></i>選擇展覽視角：
+                    </label>
+                    <select 
+                      value={selectedExId} 
+                      onChange={(e) => setSelectedExId(e.target.value)}
+                      class="border border-slate-300 rounded-lg text-xs py-2 px-3 bg-slate-50 font-semibold text-slate-800 focus:outline-none focus:ring-2 focus:ring-taitra-500 w-full md:w-72"
+                    >
+                      <option value="ALL">全部展覽列表 ({exhibitions.length})</option>
+                      {exhibitions.map(ex => (
+                        <option key={ex.id} value={ex.id}>{ex.name}</option>
+                      ))}
+                    </select>
+                  </div>
+
+                  {/* Search and Dept Filters */}
+                  <div class="flex flex-col md:flex-row gap-3 w-full md:w-auto items-center">
+                    <div class="relative w-full md:w-60">
+                      <i class="fa-solid fa-magnifying-glass absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-xs"></i>
+                      <input 
+                        type="text" 
+                        placeholder="搜尋展覽或媒體..." 
+                        value={searchTerm}
+                        onChange={(e) => setSearchTerm(e.target.value)}
+                        class="w-full pl-8 pr-3 py-1.5 border border-slate-300 rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-taitra-500"
+                      />
+                    </div>
+
+                    <select 
+                      value={selectedDept} 
+                      onChange={(e) => setSelectedDept(e.target.value)}
+                      class="border border-slate-300 rounded-lg text-xs py-1.5 px-3 bg-white focus:outline-none focus:ring-2 focus:ring-taitra-500 w-full md:w-auto"
+                    >
+                      <option value="ALL">全部承辦單位</option>
+                      <option value="展覽業務處 一組">展覽業務處 一組</option>
+                      <option value="展覽業務處 二組">展覽業務處 二組</option>
+                      <option value="展覽業務處 三組">展覽業務處 三組</option>
+                      <option value="產業拓展處">產業拓展處</option>
+                      <option value="行銷專案處">行銷專案處</option>
+                    </select>
+
+                    <div class="flex items-center space-x-1 pl-2 border-l border-slate-200">
+                      <button 
+                        onClick={handleLoadSample}
+                        title="載入測試資料方便預覽"
+                        class="text-[11px] bg-slate-100 hover:bg-slate-200 text-slate-600 px-2 py-1 rounded transition"
+                      >
+                        <i class="fa-solid fa-vial mr-1"></i>載入測試資料
+                      </button>
+                      {exhibitions.length > 0 && (
+                        <button 
+                          onClick={handleClearAll}
+                          title="清空所有資料"
+                          class="text-[11px] bg-rose-50 hover:bg-rose-100 text-rose-600 px-2 py-1 rounded transition"
+                        >
+                          <i class="fa-solid fa-trash mr-1"></i>清空
+                        </button>
+                      )}
+                    </div>
+                  </div>
+
+                </div>
+
+                {/* EXHIBITION CARDS LIST */}
+                <div class="space-y-6">
+                  {filteredExhibitions.map((ex) => {
+                    const mediaItems = ex.mediaItems || [];
+                    const allocatedSum = mediaItems.reduce((acc, m) => acc + Number(m.cost || 0), 0);
+                    const isOverBudget = ex.totalBudget > 0 && allocatedSum > ex.totalBudget;
+                    const remaining = (ex.totalBudget || 0) - allocatedSum;
+
+                    return (
+                      <div key={ex.id} class="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden hover:border-taitra-300 transition">
+                        
+                        {/* Header Strip */}
+                        <div class="p-5 bg-slate-50/80 border-b border-slate-200 flex flex-col md:flex-row md:items-center justify-between gap-4">
+                          <div class="space-y-1">
+                            <div class="flex items-center space-x-2">
+                              <span class="text-xs font-semibold px-2.5 py-0.5 rounded bg-taitra-50 text-taitra-700 border border-taitra-200">
+                                {ex.department || '未指定單位'}
+                              </span>
+                              {ex.contactPerson && (
+                                <span class="text-xs text-slate-500">
+                                  <i class="fa-solid fa-user mr-1 text-slate-400"></i>承辦人: {ex.contactPerson}
+                                </span>
+                              )}
+                            </div>
+                            <h3 class="text-xl font-bold text-slate-900">{ex.name}</h3>
+                          </div>
+
+                          {/* Budget Stats Strip */}
+                          <div class="flex items-center space-x-6 bg-white px-4 py-2 rounded-xl border border-slate-200">
+                            <div>
+                              <span class="text-[11px] text-slate-400 block font-medium">展覽總廣告預算</span>
+                              <span class="text-base font-bold text-slate-800">{formatCurrency(ex.totalBudget)}</span>
+                            </div>
+                            <div class="border-l border-slate-200 h-8"></div>
+                            <div>
+                              <span class="text-[11px] text-slate-400 block font-medium">擬投放媒體總額</span>
+                              <span class={`text-base font-bold ${isOverBudget ? 'text-rose-600' : 'text-emerald-600'}`}>
+                                {formatCurrency(allocatedSum)}
+                              </span>
+                            </div>
+                            <div class="border-l border-slate-200 h-8"></div>
+                            <div>
+                              <span class="text-[11px] text-slate-400 block font-medium">預算剩餘/差額</span>
+                              <span class={`text-base font-bold ${remaining < 0 ? 'text-rose-600' : 'text-slate-700'}`}>
+                                {formatCurrency(remaining)}
+                              </span>
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Media Breakdown */}
+                        <div class="p-6 space-y-4">
+                          
+                          {/* Alert if Over Budget */}
+                          {isOverBudget && (
+                            <div class="bg-rose-50 border border-rose-200 text-rose-700 px-4 py-2 rounded-lg text-xs flex items-center justify-between">
+                              <span><i class="fa-solid fa-triangle-exclamation mr-1.5"></i>提醒：此展覽之媒體投放金額已超出預算總額 {formatCurrency(allocatedSum - ex.totalBudget)}。</span>
+                              <button onClick={() => openModal(ex)} class="underline font-bold">調整配比</button>
+                            </div>
+                          )}
+
+                          <div class="flex items-center justify-between">
+                            <h4 class="text-xs font-bold text-slate-500 uppercase tracking-wider flex items-center">
+                              <i class="fa-solid fa-list-check text-taitra-500 mr-1.5"></i>
+                              欲投放媒體組合與走期規劃 ({mediaItems.length} 項媒體)
+                            </h4>
+                            <button onClick={() => openModal(ex)} class="text-xs text-taitra-600 hover:underline font-semibold">
+                              <i class="fa-solid fa-plus mr-1"></i>編輯媒體與走期
+                            </button>
+                          </div>
+
+                          {/* Clean Table without PR Advice Column */}
+                          {mediaItems.length > 0 ? (
+                            <div class="overflow-x-auto border border-slate-200 rounded-lg">
+                              <table class="w-full text-sm text-left">
+                                <thead class="bg-slate-50 text-slate-600 text-xs uppercase border-b border-slate-200">
+                                  <tr>
+                                    <th class="px-4 py-2.5">媒體名稱</th>
+                                    <th class="px-4 py-2.5">預計廣告走期 (StartDate ~ EndDate)</th>
+                                    <th class="px-4 py-2.5 text-right">擬投放金額 (TWD)</th>
+                                    <th class="px-4 py-2.5 text-right">佔展覽預算比</th>
+                                  </tr>
+                                </thead>
+                                <tbody class="divide-y divide-slate-100">
+                                  {mediaItems.map((m, idx) => {
+                                    const ratio = ex.totalBudget > 0 ? ((m.cost / ex.totalBudget) * 100).toFixed(1) : 0;
+                                    return (
+                                      <tr key={idx} class="hover:bg-slate-50/70">
+                                        <td class="px-4 py-3 font-semibold text-slate-800 flex items-center">
+                                          <i class="fa-solid fa-newspaper text-slate-400 mr-2"></i>
+                                          {m.mediaName}
+                                        </td>
+                                        <td class="px-4 py-3 text-xs text-slate-600">
+                                          <span class="bg-slate-100 px-2.5 py-1 rounded font-mono">
+                                            {m.startDate || '未定'} ～ {m.endDate || '未定'}
+                                          </span>
+                                        </td>
+                                        <td class="px-4 py-3 text-right font-bold text-slate-800">{formatCurrency(m.cost)}</td>
+                                        <td class="px-4 py-3 text-right text-xs font-mono text-slate-500">{ratio}%</td>
+                                      </tr>
+                                    );
+                                  })}
+                                </tbody>
+                              </table>
+                            </div>
+                          ) : (
+                            <div class="text-center py-6 bg-slate-50 border border-dashed border-slate-200 rounded-lg text-slate-400 text-xs">
+                              尚未規劃投放媒體項目，請點擊「編輯媒體與走期」進行新增。
+                            </div>
+                          )}
+
+                          {ex.notes && (
+                            <div class="bg-slate-50 border border-slate-200 p-3 rounded-lg text-xs text-slate-600">
+                              <strong class="text-slate-700">展覽宣傳備註：</strong> {ex.notes}
+                            </div>
+                          )}
+
+                        </div>
+
+                        {/* Card Footer */}
+                        <div class="px-6 py-3 bg-slate-50 border-t border-slate-100 flex items-center justify-end space-x-3">
+                          <button 
+                            onClick={() => openModal(ex)}
+                            class="text-xs text-slate-700 hover:text-taitra-600 bg-white border border-slate-300 px-3 py-1.5 rounded-md shadow-sm font-medium transition"
+                          >
+                            <i class="fa-solid fa-pen-to-square mr-1"></i>編輯展覽需求
+                          </button>
+                          <button 
+                            onClick={() => handleDeleteExhibition(ex.id)}
+                            class="text-xs text-rose-600 hover:text-rose-700 bg-white border border-rose-200 px-3 py-1.5 rounded-md hover:bg-rose-50 transition font-medium"
+                          >
+                            <i class="fa-solid fa-trash-can mr-1"></i>刪除
+                          </button>
+                        </div>
+
+                      </div>
+                    );
+                  })}
+
+                  {filteredExhibitions.length === 0 && (
+                    <div class="bg-white p-12 text-center rounded-xl border border-dashed border-slate-300 text-slate-400 space-y-3">
+                      <i class="fa-solid fa-folder-open text-4xl text-slate-300"></i>
+                      <p class="text-sm">目前尚無任何展覽需求資料</p>
+                      <div class="pt-2">
+                        <button 
+                          onClick={() => openModal()}
+                          class="bg-taitra-500 hover:bg-taitra-600 text-white px-4 py-2 rounded-lg text-xs font-semibold shadow transition"
+                        >
+                          <i class="fa-solid fa-plus mr-1.5"></i>建立第一個展覽需求
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+              </div>
+            )}
+
+            {/* TAB 2: 媒體整合與採購池 (MEDIA VIEW) */}
+            {activeTab === 'media' && (
+              <div class="space-y-6">
+                
+                {/* MEDIA FILTER BAR */}
+                <div class="bg-white p-4 rounded-xl shadow-sm border border-slate-200 flex flex-col md:flex-row gap-4 items-center justify-between">
+                  <div class="flex items-center space-x-2 w-full md:w-auto">
+                    <label class="text-xs font-bold text-slate-600 whitespace-nowrap flex items-center">
+                      <i class="fa-solid fa-newspaper text-taitra-500 mr-1.5"></i>選擇媒體視角：
+                    </label>
+                    <select 
+                      value={selectedMediaName} 
+                      onChange={(e) => setSelectedMediaName(e.target.value)}
+                      class="border border-slate-300 rounded-lg text-xs py-2 px-3 bg-slate-50 font-semibold text-slate-800 focus:outline-none focus:ring-2 focus:ring-taitra-500 w-full md:w-72"
+                    >
+                      <option value="ALL">全部集中採購媒體池 ({mediaConsolidation.length} 家)</option>
+                      {mediaConsolidation.map(m => (
+                        <option key={m.mediaName} value={m.mediaName}>{m.mediaName} ({m.exhibitionsCount} 展，{formatCurrency(m.totalPooledBudget)})</option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div class="relative w-full md:w-72">
+                    <i class="fa-solid fa-magnifying-glass absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-xs"></i>
+                    <input 
+                      type="text" 
+                      placeholder="搜尋媒體或展覽名稱..." 
+                      value={searchTerm}
+                      onChange={(e) => setSearchTerm(e.target.value)}
+                      class="w-full pl-8 pr-3 py-1.5 border border-slate-300 rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-taitra-500"
+                    />
+                  </div>
+                </div>
+
+                {/* MEDIA POOL LIST */}
+                <div class="space-y-4">
+                  {filteredMedia.map((m, idx) => (
+                    <div key={idx} class="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
+                      
+                      {/* Media Card Header */}
+                      <div class="bg-slate-50 px-6 py-4 border-b border-slate-200 flex flex-col md:flex-row md:items-center justify-between gap-4">
+                        <div class="flex items-center space-x-3">
+                          <span class={`w-8 h-8 rounded-lg flex items-center justify-center font-bold text-xs ${m.exhibitionsCount > 1 ? 'bg-taitra-500 text-white shadow' : 'bg-slate-200 text-slate-700'}`}>
+                            {idx + 1}
+                          </span>
+                          <div>
+                            <div class="flex items-center space-x-2">
+                              <h3 class="text-lg font-bold text-slate-900">{m.mediaName}</h3>
+                              {m.exhibitionsCount > 1 && (
+                                <span class="bg-indigo-100 text-indigo-700 border border-indigo-200 text-xs font-semibold px-2.5 py-0.5 rounded-full">
+                                  <i class="fa-solid fa-handshake mr-1"></i>{m.exhibitionsCount} 展共構媒體池
+                                </span>
+                              )}
+                            </div>
+                            <p class="text-xs text-slate-500 mt-0.5">
+                              <i class="fa-regular fa-calendar-days mr-1 text-slate-400"></i>跨展廣告涵蓋走期：<strong class="text-slate-700">{m.minDate || '未定'} ～ {m.maxDate || '未定'}</strong>
+                            </p>
+                          </div>
+                        </div>
+
+                        {/* Total Budget */}
+                        <div class="text-right">
+                          <span class="text-xs text-slate-500 block">匯集談判總預算</span>
+                          <span class="text-2xl font-black text-taitra-600">{formatCurrency(m.totalPooledBudget)}</span>
+                        </div>
+                      </div>
+
+                      {/* Media Exhibitions Breakdown */}
+                      <div class="p-6">
+                        <h4 class="text-xs font-bold text-slate-500 uppercase tracking-wider mb-3">
+                          欲投放此媒體之展覽細項 ({m.exhibitionsList.length} 個展覽)
+                        </h4>
+                        <div class="overflow-x-auto border border-slate-200 rounded-lg">
+                          <table class="w-full text-sm text-left">
+                            <thead class="bg-slate-50 text-slate-600 text-xs uppercase border-b border-slate-200">
+                              <tr>
+                                <th class="px-4 py-2.5">展覽名稱</th>
+                                <th class="px-4 py-2.5">承辦單位</th>
+                                <th class="px-4 py-2.5 text-right">展覽預估投放金額</th>
+                                <th class="px-4 py-2.5">預計廣告走期</th>
+                              </tr>
+                            </thead>
+                            <tbody class="divide-y divide-slate-100">
+                              {m.exhibitionsList.map((exItem, exIdx) => (
+                                <tr key={exIdx} class="hover:bg-slate-50">
+                                  <td class="px-4 py-2.5 font-semibold text-slate-800">{exItem.exhibitionName}</td>
+                                  <td class="px-4 py-2.5 text-xs text-slate-500">{exItem.department}</td>
+                                  <td class="px-4 py-2.5 text-right font-bold text-slate-700">{formatCurrency(exItem.cost)}</td>
+                                  <td class="px-4 py-2.5 text-xs text-slate-500 font-mono">{exItem.startDate || '未定'} ~ {exItem.endDate || '未定'}</td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      </div>
+
+                    </div>
+                  ))}
+
+                  {filteredMedia.length === 0 && (
+                    <div class="bg-white p-12 text-center rounded-xl border border-dashed border-slate-300 text-slate-400">
+                      <i class="fa-solid fa-inbox text-4xl mb-3 text-slate-300"></i>
+                      <p class="text-sm">尚未有任何媒體採購池項目，請先於「展覽需求管理」新增資料。</p>
+                    </div>
+                  )}
+                </div>
+
+              </div>
+            )}
+
+            {/* TAB 3: 總體數據儀表板 (DASHBOARD) */}
+            {activeTab === 'dashboard' && (
+              <div class="space-y-6">
+                
+                {/* Header Banner */}
+                <div class="bg-gradient-to-r from-taitra-900 to-taitra-700 text-white p-6 rounded-2xl shadow-sm flex flex-col md:flex-row items-center justify-between">
+                  <div class="space-y-1">
+                    <h2 class="text-xl font-bold flex items-center">
+                      <i class="fa-solid fa-chart-line mr-2.5 text-amber-400"></i>
+                      外貿協會全館展覽媒體採購戰情盤面
+                    </h2>
+                    <p class="text-xs text-taitra-100">
+                      即時彙整各展覽需求，協助公關組掌控全館媒體聲量與議價籌碼。
+                    </p>
+                  </div>
+                  <button 
+                    onClick={() => exportCSV('media')}
+                    class="mt-4 md:mt-0 bg-emerald-500 hover:bg-emerald-400 text-white font-bold px-4 py-2 rounded-xl shadow transition text-xs flex items-center"
+                  >
+                    <i class="fa-solid fa-download mr-1.5"></i>下載採購池 CSV
+                  </button>
+                </div>
+
+                {/* VISUAL CHARTS SECTION */}
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  
+                  {/* Top Media Ranking Bar */}
+                  <div class="bg-white p-6 rounded-xl shadow-sm border border-slate-200">
+                    <h3 class="text-sm font-bold text-slate-800 mb-4 flex items-center">
+                      <i class="fa-solid fa-fire text-rose-500 mr-2"></i>
+                      熱門媒體排行 (Top Media by Budget Pool)
+                    </h3>
+
+                    {mediaConsolidation.length > 0 ? (
+                      <div class="space-y-4">
+                        {mediaConsolidation.slice(0, 5).map((m, idx) => {
+                          const maxBudget = mediaConsolidation[0]?.totalPooledBudget || 1;
+                          const barWidth = `${(m.totalPooledBudget / maxBudget) * 100}%`;
+
+                          return (
+                            <div key={idx} class="space-y-1">
+                              <div class="flex justify-between text-xs">
+                                <span class="font-bold text-slate-800">{idx + 1}. {m.mediaName} ({m.exhibitionsCount} 展)</span>
+                                <span class="font-extrabold text-taitra-600">{formatCurrency(m.totalPooledBudget)}</span>
+                              </div>
+                              <div class="w-full bg-slate-100 h-3 rounded-full overflow-hidden">
+                                <div 
+                                  class="bg-taitra-500 h-full rounded-full transition-all duration-500"
+                                  style={{ width: barWidth }}
+                                ></div>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    ) : (
+                      <p class="text-xs text-slate-400 text-center py-8">尚無媒體數據</p>
+                    )}
+                  </div>
+
+                  {/* Exhibition Budget Allocation Breakdown */}
+                  <div class="bg-white p-6 rounded-xl shadow-sm border border-slate-200">
+                    <h3 class="text-sm font-bold text-slate-800 mb-4 flex items-center">
+                      <i class="fa-solid fa-chart-pie text-indigo-500 mr-2"></i>
+                      各展覽預算規模 (Exhibition Budget Breakdown)
+                    </h3>
+
+                    {exhibitions.length > 0 ? (
+                      <div class="space-y-3">
+                        {exhibitions.map((ex) => {
+                          const shareRatio = stats.totalBudgetSum > 0 ? ((ex.totalBudget / stats.totalBudgetSum) * 100).toFixed(1) : 0;
+                          return (
+                            <div key={ex.id} class="flex items-center justify-between p-2.5 rounded-lg bg-slate-50 text-xs">
+                              <div class="flex items-center space-x-2">
+                                <span class="w-2.5 h-2.5 rounded-full bg-taitra-500"></span>
+                                <span class="font-semibold text-slate-800">{ex.name}</span>
+                              </div>
+                              <div class="text-right">
+                                <span class="font-bold text-slate-900 mr-2">{formatCurrency(ex.totalBudget)}</span>
+                                <span class="text-slate-400 font-mono">({shareRatio}%)</span>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    ) : (
+                      <p class="text-xs text-slate-400 text-center py-8">尚無展覽數據</p>
+                    )}
+                  </div>
+
+                </div>
+
+              </div>
+            )}
+
+          </main>
+
+          {/* FOOTER */}
+          <footer class="bg-white border-t border-slate-200 py-4 text-center text-xs text-slate-500">
+            外貿協會 (TAITRA) 公關組 &copy; 跨展覽媒體廣告採購與預算整合管理系統
+          </footer>
+
+          {/* MODAL: ADD / EDIT EXHIBITION */}
+          {isModalOpen && (
+            <div class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm overflow-y-auto">
+              <div class="bg-white rounded-2xl shadow-xl w-full max-w-3xl overflow-hidden max-h-[90vh] flex flex-col my-8">
+                
+                <div class="bg-taitra-900 text-white px-6 py-4 flex items-center justify-between">
+                  <h3 class="font-bold text-base flex items-center">
+                    <i class="fa-solid fa-pen-to-square mr-2"></i>
+                    {editingExhibition ? '編輯展覽需求' : '新增展覽需求'}
+                  </h3>
+                  <button onClick={() => setIsModalOpen(false)} class="text-slate-300 hover:text-white text-lg">
+                    <i class="fa-solid fa-xmark"></i>
+                  </button>
+                </div>
+
+                <form onSubmit={handleFormSubmit} class="p-6 space-y-6 overflow-y-auto flex-grow text-sm">
+                  
+                  <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div>
+                      <label class="block text-xs font-semibold text-slate-700 mb-1">展覽名稱 *</label>
+                      <input 
+                        type="text" 
+                        required
+                        placeholder="例如：COMPUTEX 2025" 
+                        value={formData.name}
+                        onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                        class="w-full border border-slate-300 rounded-lg p-2.5 text-xs focus:ring-2 focus:ring-taitra-500 focus:outline-none"
+                      />
+                    </div>
+
+                    <div>
+                      <label class="block text-xs font-semibold text-slate-700 mb-1">承辦單位 *</label>
+                      <select 
+                        value={formData.department}
+                        onChange={(e) => setFormData({ ...formData, department: e.target.value })}
+                        class="w-full border border-slate-300 rounded-lg p-2.5 text-xs focus:ring-2 focus:ring-taitra-500 focus:outline-none"
+                      >
+                        <option value="展覽業務處 一組">展覽業務處 一組</option>
+                        <option value="展覽業務處 二組">展覽業務處 二組</option>
+                        <option value="展覽業務處 三組">展覽業務處 三組</option>
+                        <option value="產業拓展處">產業拓展處</option>
+                        <option value="行銷專案處">行銷專案處</option>
+                        <option value="其他單位">其他單位</option>
+                      </select>
+                    </div>
+
+                    <div>
+                      <label class="block text-xs font-semibold text-slate-700 mb-1">展覽廣告總預算 (TWD) *</label>
+                      <input 
+                        type="number" 
+                        required
+                        min="0"
+                        placeholder="例如：2000000"
+                        value={formData.totalBudget}
+                        onChange={(e) => setFormData({ ...formData, totalBudget: e.target.value === '' ? '' : Number(e.target.value) })}
+                        class="w-full border border-slate-300 rounded-lg p-2.5 text-xs focus:ring-2 focus:ring-taitra-500 focus:outline-none"
+                      />
+                    </div>
+
+                    <div>
+                      <label class="block text-xs font-semibold text-slate-700 mb-1">展覽承辦人</label>
+                      <input 
+                        type="text" 
+                        placeholder="例如：張專員" 
+                        value={formData.contactPerson}
+                        onChange={(e) => setFormData({ ...formData, contactPerson: e.target.value })}
+                        class="w-full border border-slate-300 rounded-lg p-2.5 text-xs focus:ring-2 focus:ring-taitra-500 focus:outline-none"
+                      />
+                    </div>
+                  </div>
+
+                  {/* Media Dynamic Rows (Without PR Note) */}
+                  <div class="space-y-3 pt-2 border-t border-slate-200">
+                    <div class="flex items-center justify-between">
+                      <h4 class="font-bold text-slate-800 text-xs uppercase tracking-wider">欲投放媒體與走期規劃</h4>
+                      <button 
+                        type="button" 
+                        onClick={handleAddMediaRow}
+                        class="text-xs bg-slate-100 hover:bg-slate-200 text-taitra-700 font-semibold px-2.5 py-1 rounded flex items-center"
+                      >
+                        <i class="fa-solid fa-plus mr-1"></i>新增媒體項目
+                      </button>
+                    </div>
+
+                    {formData.mediaItems.map((m, idx) => (
+                      <div key={idx} class="p-3 bg-slate-50 border border-slate-200 rounded-xl space-y-2">
+                        <div class="grid grid-cols-1 md:grid-cols-4 gap-2 items-end">
+                          <div>
+                            <label class="text-[10px] font-bold text-slate-500 uppercase">媒體名稱</label>
+                            <input 
+                              type="text" 
+                              placeholder="如：工商時報"
+                              value={m.mediaName}
+                              onChange={(e) => handleMediaChange(idx, 'mediaName', e.target.value)}
+                              class="w-full border border-slate-300 rounded p-1.5 text-xs focus:ring-1 focus:ring-taitra-500"
+                            />
+                          </div>
+
+                          <div>
+                            <label class="text-[10px] font-bold text-slate-500 uppercase">擬投放金額 (TWD)</label>
+                            <input 
+                              type="number" 
+                              placeholder="如：500000"
+                              value={m.cost}
+                              onChange={(e) => handleMediaChange(idx, 'cost', e.target.value === '' ? '' : Number(e.target.value))}
+                              class="w-full border border-slate-300 rounded p-1.5 text-xs focus:ring-1 focus:ring-taitra-500"
+                            />
+                          </div>
+
+                          <div>
+                            <label class="text-[10px] font-bold text-slate-500 uppercase">走期開始</label>
+                            <input 
+                              type="date" 
+                              value={m.startDate}
+                              onChange={(e) => handleMediaChange(idx, 'startDate', e.target.value)}
+                              class="w-full border border-slate-300 rounded p-1.5 text-xs focus:ring-1 focus:ring-taitra-500"
+                            />
+                          </div>
+
+                          <div class="flex items-center space-x-2">
+                            <div class="flex-grow">
+                              <label class="text-[10px] font-bold text-slate-500 uppercase">走期結束</label>
+                              <input 
+                                type="date" 
+                                value={m.endDate}
+                                onChange={(e) => handleMediaChange(idx, 'endDate', e.target.value)}
+                                class="w-full border border-slate-300 rounded p-1.5 text-xs focus:ring-1 focus:ring-taitra-500"
+                              />
+                            </div>
+                            {formData.mediaItems.length > 1 && (
+                              <button 
+                                type="button"
+                                onClick={() => handleRemoveMediaRow(idx)}
+                                class="text-rose-500 hover:text-rose-700 p-2 text-xs mb-0.5"
+                                title="刪除此列"
+                              >
+                                <i class="fa-solid fa-trash-can"></i>
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+
+                  <div>
+                    <label class="block text-xs font-semibold text-slate-700 mb-1">展覽宣傳備註</label>
+                    <textarea 
+                      rows="2"
+                      placeholder="可補充此展覽宣傳重點或內部備註..."
+                      value={formData.notes}
+                      onChange={(e) => setFormData({ ...formData, notes: e.target.value })}
+                      class="w-full border border-slate-300 rounded-lg p-2.5 text-xs focus:ring-2 focus:ring-taitra-500 focus:outline-none"
+                    ></textarea>
+                  </div>
+
+                  <div class="flex justify-end space-x-3 pt-4 border-t border-slate-200">
+                    <button 
+                      type="button" 
+                      onClick={() => setIsModalOpen(false)}
+                      class="px-4 py-2 border border-slate-300 text-slate-600 rounded-lg text-xs font-medium hover:bg-slate-50"
+                    >
+                      取消
+                    </button>
+                    <button 
+                      type="submit" 
+                      class="px-4 py-2 bg-taitra-500 hover:bg-taitra-600 text-white rounded-lg text-xs font-medium shadow"
+                    >
+                      儲存
+                    </button>
+                  </div>
+
+                </form>
+              </div>
+            </div>
+          )}
+
+        </div>
+      );
+    }
+
+    ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+  </script>
+</body>
+</html>
