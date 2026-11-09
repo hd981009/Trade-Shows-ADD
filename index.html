@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>外貿協會 - 媒體採購與預算整合管理系統</title>
+  <title>外貿協會公關組 - 跨展覽媒體採購與預算整合管理系統 (GAS 雲端共編版)</title>
   <!-- React & ReactDOM -->
   <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
   <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
@@ -11,21 +11,19 @@
   <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
   <!-- Tailwind CSS -->
   <script src="https://cdn.tailwindcss.com"></script>
-  <!-- Lucide Icons -->
-  <script src="https://unpkg.com/lucide@latest"></script>
-  <script src="https://unpkg.com/lucide-react@latest"></script>
   <style>
     @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@300;400;500;700&display=swap');
     body { font-family: 'Noto Sans TC', sans-serif; }
   </style>
-  <!-- 網站書籤圖示 -->
-<link rel="icon" type="image/png" href="./favicon.png">
 </head>
 <body class="bg-slate-50 text-slate-800">
   <div id="root"></div>
 
   <script type="text/babel">
     const { useState, useEffect, useMemo } = React;
+
+    // ⚠️ 請將下方的網址替換為您第一步部署 Apps Script 後取得的 Web App URL
+    const GAS_WEB_APP_URL = "https://script.google.com/macros/s/AKfycbzFYzNAij9SbKi83N3lQS5k__dVulfSzjZtoVeqFy7c1P-Gf-7U0F8KecSiw6FDGNtV/exec";
 
     const PRESET_MEDIA_LIST = [
       "工商時報", "經濟日報", "數位時代", "商業周刊", 
@@ -40,6 +38,11 @@
       const [selectedMediaName, setSelectedMediaName] = useState('');
       const [filteredExhibitionIds, setFilteredExhibitionIds] = useState([]);
 
+      // 雲端同步狀態標示
+      const [isLoading, setIsLoading] = useState(false);
+      const [isSaving, setIsSaving] = useState(false);
+      const [syncStatus, setSyncStatus] = useState('已連線至雲端資料庫');
+
       const [isModalOpen, setIsModalOpen] = useState(false);
       const [editingExhibition, setEditingExhibition] = useState(null);
 
@@ -51,34 +54,64 @@
         mediaItems: []
       });
 
-      useEffect(() => {
-        const savedData = localStorage.getItem('taitra_media_procurement_data');
-        if (savedData) {
-          try {
-            const parsed = JSON.parse(savedData);
-            setExhibitions(parsed);
-            setFilteredExhibitionIds(parsed.map(e => e.id));
-          } catch (e) {
-            console.error('Failed to parse storage', e);
-          }
+      // 從 Google Apps Script (Google Sheet) 讀取最新雲端共編資料
+      const fetchCloudData = async () => {
+        if (!GAS_WEB_APP_URL || GAS_WEB_APP_URL.includes('YOUR_SCRIPT_ID_HERE')) {
+          setSyncStatus('尚未設定 GAS URL (目前使用單機模式)');
+          return;
         }
-      }, []);
+        setIsLoading(true);
+        setSyncStatus('正在同步雲端資料...');
+        try {
+          const res = await fetch(GAS_WEB_APP_URL);
+          const data = await res.json();
+          if (Array.isArray(data)) {
+            setExhibitions(data);
+            setFilteredExhibitionIds(data.map(e => e.id));
+            setSyncStatus('雲端資料已是最新狀態');
+          }
+        } catch (err) {
+          console.error('Fetch error:', err);
+          setSyncStatus('雲端連線失敗，請檢查網路或 GAS URL 設定');
+        } finally {
+          setIsLoading(false);
+        }
+      };
+
+      // 儲存資料同步至 Google Apps Script
+      const saveCloudData = async (newData) => {
+        setExhibitions(newData);
+        if (!GAS_WEB_APP_URL || GAS_WEB_APP_URL.includes('YOUR_SCRIPT_ID_HERE')) {
+          localStorage.setItem('taitra_media_procurement_data', JSON.stringify(newData));
+          return;
+        }
+        setIsSaving(true);
+        setSyncStatus('正在寫入 Google Sheet 雲端資料庫...');
+        try {
+          await fetch(GAS_WEB_APP_URL, {
+            method: 'POST',
+            mode: 'no-cors',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(newData)
+          });
+          setSyncStatus('雲端共編資料庫同步成功！');
+        } catch (err) {
+          console.error('Save error:', err);
+          setSyncStatus('寫入失敗，請稍後再試');
+        } finally {
+          setIsSaving(false);
+        }
+      };
 
       useEffect(() => {
-        localStorage.setItem('taitra_media_procurement_data', JSON.stringify(exhibitions));
-      }, [exhibitions]);
+        fetchCloudData();
+      }, []);
 
       useEffect(() => {
         if (exhibitions.length > 0 && filteredExhibitionIds.length === 0) {
           setFilteredExhibitionIds(exhibitions.map(e => e.id));
         }
       }, [exhibitions]);
-
-      useEffect(() => {
-        if (window.lucide) {
-          window.lucide.createIcons();
-        }
-      });
 
       const mediaProcurementPool = useMemo(() => {
         const map = {};
@@ -93,8 +126,7 @@
                 totalExhibitionBudget: 0,
                 totalPRRecommended: 0,
                 exhibitionsCount: 0,
-                participatingExhibitions: [],
-                schedules: []
+                participatingExhibitions: []
               };
             }
 
@@ -113,18 +145,9 @@
               startDate: item.startDate,
               endDate: item.endDate
             });
-
-            if (item.startDate || item.endDate) {
-              map[mediaName].schedules.push({
-                exhibitionName: ex.name,
-                start: item.startDate || '未定',
-                end: item.endDate || '未定'
-              });
-            }
           });
         });
 
-        // 排序改以公關建議總額 (totalPRRecommended) 為基準
         return Object.values(map).sort((a, b) => b.totalPRRecommended - a.totalPRRecommended);
       }, [exhibitions]);
 
@@ -216,23 +239,23 @@
           }))
         };
 
+        let updatedList = [];
         if (editingExhibition) {
-          setExhibitions(prev => prev.map(ex => ex.id === editingExhibition.id ? newExhibition : ex));
+          updatedList = exhibitions.map(ex => ex.id === editingExhibition.id ? newExhibition : ex);
         } else {
-          setExhibitions(prev => {
-            const updatedList = [...prev, newExhibition];
-            setFilteredExhibitionIds(updatedList.map(e => e.id));
-            return updatedList;
-          });
+          updatedList = [...exhibitions, newExhibition];
+          setFilteredExhibitionIds(updatedList.map(e => e.id));
         }
 
+        saveCloudData(updatedList);
         setIsModalOpen(false);
       };
 
       const handleDeleteExhibition = (id) => {
         if (confirm('確定要刪除此展覽規劃嗎？')) {
-          setExhibitions(prev => prev.filter(ex => ex.id !== id));
+          const updatedList = exhibitions.filter(ex => ex.id !== id);
           setFilteredExhibitionIds(prev => prev.filter(exId => exId !== id));
+          saveCloudData(updatedList);
         }
       };
 
@@ -248,37 +271,6 @@
 
       const handleClearFilter = () => {
         setFilteredExhibitionIds([]);
-      };
-
-      const handleExportJSON = () => {
-        const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(exhibitions, null, 2));
-        const downloadAnchor = document.createElement('a');
-        downloadAnchor.setAttribute("href", dataStr);
-        downloadAnchor.setAttribute("download", `TAITRA_PR_Media_Procurement_${new Date().toISOString().slice(0,10)}.json`);
-        document.body.appendChild(downloadAnchor);
-        downloadAnchor.click();
-        downloadAnchor.remove();
-      };
-
-      const handleImportJSON = (e) => {
-        const fileReader = new FileReader();
-        if (e.target.files && e.target.files[0]) {
-          fileReader.readAsText(e.target.files[0], "UTF-8");
-          fileReader.onload = (event) => {
-            try {
-              const parsed = JSON.parse(event.target.result);
-              if (Array.isArray(parsed)) {
-                setExhibitions(parsed);
-                setFilteredExhibitionIds(parsed.map(e => e.id));
-                alert('成功匯入設定檔！');
-              } else {
-                alert('檔案格式不符');
-              }
-            } catch (err) {
-              alert('讀取失敗');
-            }
-          };
-        }
       };
 
       const handleExportCSV = () => {
@@ -301,46 +293,6 @@
         document.body.appendChild(link);
         link.click();
         link.remove();
-      };
-
-      const handleLoadSampleData = () => {
-        const sampleData = [
-          {
-            id: 'EX-SAMPLE-1',
-            name: 'COMPUTEX 2027',
-            department: '展覽處展二組',
-            totalBudget: 1500000,
-            notes: '著重 AI 伺服器與半導體供應鏈，需加強國際與本土財經媒體曝光。',
-            mediaItems: [
-              { id: 'm1', name: '工商時報', exBudget: 400000, prBudget: 450000, startDate: '2027-04-01', endDate: '2027-06-05' },
-              { id: 'm2', name: '經濟日報', exBudget: 400000, prBudget: 450000, startDate: '2027-04-01', endDate: '2027-06-05' },
-              { id: 'm3', name: '數位時代', exBudget: 300000, prBudget: 250000, startDate: '2027-05-01', endDate: '2027-06-05' },
-              { id: 'm4', name: 'TechNews 科技新報', exBudget: 200000, prBudget: 200000, startDate: '2027-05-15', endDate: '2027-06-05' }
-            ]
-          },
-          {
-            id: 'EX-SAMPLE-2',
-            name: 'TAISPO 台灣國際運動及健身展 2027',
-            department: '展覽處展一組',
-            totalBudget: 800000,
-            notes: '主打智慧健身與戶外戶內運動科技，欲串聯財經報紙與社群廣告。',
-            mediaItems: [
-              { id: 'm5', name: '工商時報', exBudget: 250000, prBudget: 200000, startDate: '2027-02-01', endDate: '2027-03-25' },
-              { id: 'm6', name: 'Facebook / Instagram 廣告', exBudget: 300000, prBudget: 350000, startDate: '2027-02-15', endDate: '2027-03-28' },
-              { id: 'm7', name: '自由時報', exBudget: 200000, prBudget: 250000, startDate: '2027-03-01', endDate: '2027-03-27' }
-            ]
-          }
-        ];
-        setExhibitions(sampleData);
-        setFilteredExhibitionIds(sampleData.map(e => e.id));
-      };
-
-      const handleClearAllData = () => {
-        if (confirm('確定要清空所有展覽與媒體需求資料嗎？')) {
-          setExhibitions([]);
-          setFilteredExhibitionIds([]);
-          setSelectedMediaName('');
-        }
       };
 
       const overallStats = useMemo(() => {
@@ -403,7 +355,12 @@
                 </div>
                 <div>
                   <h1 className="text-lg font-bold leading-tight">外貿協會公關組</h1>
-                  <p className="text-xs text-slate-400">媒體採購與預算整合管理系統</p>
+                  <div className="flex items-center space-x-2 text-xs text-slate-400">
+                    <span>跨展覽媒體採購與預算整合管理系統</span>
+                    <span className="bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 px-1.5 py-0.5 rounded text-[10px]">
+                      ☁️ Google Sheet 共編中
+                    </span>
+                  </div>
                 </div>
               </div>
 
@@ -415,7 +372,7 @@
                     activeTab === 'exhibitions' ? 'bg-blue-600 text-white shadow' : 'text-slate-300 hover:text-white hover:bg-slate-700/50'
                   }`}
                 >
-                  依展覽 (需求管理)
+                  展覽視角 (需求管理)
                 </button>
                 <button
                   onClick={() => setActiveTab('media')}
@@ -423,7 +380,7 @@
                     activeTab === 'media' ? 'bg-blue-600 text-white shadow' : 'text-slate-300 hover:text-white hover:bg-slate-700/50'
                   }`}
                 >
-                  依媒體 (採購參考)
+                  媒體視角 (集購大總額)
                 </button>
                 <button
                   onClick={() => setActiveTab('dashboard')}
@@ -435,71 +392,60 @@
                 </button>
               </nav>
 
-              {/* Action Buttons */}
+              {/* Actions & Status */}
               <div className="flex items-center space-x-2">
+                <button
+                  onClick={() => fetchCloudData()}
+                  title="重新從 Google Sheet 抓取最新共編資料"
+                  className="bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 px-2.5 py-1.5 rounded-lg text-xs font-medium flex items-center space-x-1"
+                >
+                  <span>🔄</span>
+                  <span>{isLoading ? '同步中...' : '重新整理數據'}</span>
+                </button>
+
                 <button
                   onClick={() => handleOpenModal()}
                   className="bg-emerald-600 hover:bg-emerald-500 text-white px-3 py-1.5 rounded-lg text-xs font-medium flex items-center shadow transition-all"
                 >
                   <span className="mr-1 text-base font-bold">+</span> 新增展覽
                 </button>
-                
-                <div className="h-4 w-px bg-slate-700 mx-1"></div>
 
                 <button onClick={handleExportCSV} title="匯出 CSV 報表" className="bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 px-2.5 py-1.5 rounded-lg text-xs font-medium">
                   匯出 CSV
                 </button>
-                <button onClick={handleExportJSON} title="匯出系統設定檔" className="bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 px-2.5 py-1.5 rounded-lg text-xs font-medium">
-                  匯出 JSON
-                </button>
-                <label className="bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 px-2.5 py-1.5 rounded-lg text-xs font-medium cursor-pointer">
-                  匯入 JSON
-                  <input type="file" accept=".json" onChange={handleImportJSON} className="hidden" />
-                </label>
-
-                {exhibitions.length === 0 && (
-                  <button onClick={handleLoadSampleData} className="bg-indigo-600 hover:bg-indigo-500 text-white px-2.5 py-1.5 rounded-lg text-xs font-medium shadow">
-                    載入測試資料
-                  </button>
-                )}
-                {exhibitions.length > 0 && (
-                  <button onClick={handleClearAllData} className="bg-rose-900/60 hover:bg-rose-800 text-rose-200 border border-rose-700/50 px-2.5 py-1.5 rounded-lg text-xs font-medium">
-                    清空
-                  </button>
-                )}
               </div>
+            </div>
+
+            {/* 即時連線狀態標示條 */}
+            <div className="bg-slate-800/80 px-4 py-1 text-[11px] text-slate-300 flex justify-between items-center border-t border-slate-800">
+              <span>雲端狀態：{syncStatus}</span>
+              {isSaving && <span className="text-amber-400 font-bold">⚡ 正在寫入 Google Sheet...</span>}
             </div>
           </header>
 
           {/* Main Content */}
           <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6">
 
-            {exhibitions.length === 0 && (
+            {exhibitions.length === 0 && !isLoading && (
               <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-12 text-center my-8">
                 <div className="w-16 h-16 bg-blue-50 text-blue-600 rounded-full flex items-center justify-center mx-auto mb-4 font-bold text-2xl">
                   📋
                 </div>
                 <h3 className="text-xl font-bold text-slate-800 mb-2">目前尚無展覽媒體需求資料</h3>
                 <p className="text-slate-500 text-sm max-w-md mx-auto mb-6">
-                  點擊右上角的「新增展覽」開始登錄各個展覽處的媒體預算與走期；或點擊「載入測試資料」快速預覽系統功能。
+                  點擊右上角「新增展覽」新增需求，所有輸入的資料都會自動即時同步給全組同仁！
                 </p>
-                <div className="flex justify-center space-x-3">
-                  <button onClick={() => handleOpenModal()} className="bg-blue-600 hover:bg-blue-700 text-white px-5 py-2 rounded-lg font-medium text-sm shadow">
-                    + 開始新增展覽
-                  </button>
-                  <button onClick={handleLoadSampleData} className="bg-slate-100 hover:bg-slate-200 text-slate-700 px-5 py-2 rounded-lg font-medium text-sm">
-                    載入測試範例資料
-                  </button>
-                </div>
+                <button onClick={() => handleOpenModal()} className="bg-blue-600 hover:bg-blue-700 text-white px-5 py-2 rounded-lg font-medium text-sm shadow">
+                  + 開始新增第一個展覽需求
+                </button>
               </div>
             )}
 
             {exhibitions.length > 0 && (
               <>
-                {/* 1. 依展覽 (Exhibition View) */}
+                {/* 1. 展覽視角 */}
                 {activeTab === 'exhibitions' && (
                   <div className="space-y-6">
-                    {/* 多選篩選工具列 */}
                     <div className="bg-white p-4 rounded-xl shadow-sm border border-slate-200 space-y-3">
                       <div className="flex flex-wrap items-center justify-between gap-2">
                         <span className="text-sm font-bold text-slate-800 flex items-center">
@@ -536,10 +482,10 @@
                       </div>
                     </div>
 
-                    {/* 各展覽廣告走期圖表化 (甘特圖) */}
+                    {/* 各展覽廣告走期甘特圖 */}
                     <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200 space-y-4">
                       <h3 className="font-bold text-slate-800 text-base flex items-center">
-                        <span className="mr-2">📊</span> 廣告走期
+                        <span className="mr-2">📊</span> 各展覽媒體廣告投放走期甘特圖 (依時間排序)
                       </h3>
 
                       <div className="border border-slate-200 rounded-lg p-4 bg-slate-50/50 space-y-3">
@@ -596,16 +542,11 @@
                               </div>
                             );
                           })}
-                          {displayedExhibitions.length === 0 && (
-                            <div className="text-center py-6 text-slate-400 text-xs">
-                              未勾選任何展覽或尚無資料
-                            </div>
-                          )}
                         </div>
                       </div>
                     </div>
 
-                    {/* 所有選取展覽的詳細清單與媒體規劃卡片 */}
+                    {/* 詳細需求卡片 */}
                     <div className="space-y-6">
                       {displayedExhibitions.map(ex => {
                         const totalExAllocated = (ex.mediaItems || []).reduce((sum, item) => sum + (Number(item.exBudget) || 0), 0);
@@ -698,10 +639,9 @@
                   </div>
                 )}
 
-                {/* 2. 依媒體 (Media View - 採購參考) */}
+                {/* 2. 媒體視角 */}
                 {activeTab === 'media' && (
                   <div className="space-y-6">
-                    {/* 媒體篩選工具列 */}
                     <div className="bg-white p-4 rounded-xl shadow-sm border border-slate-200 flex flex-wrap items-center justify-between gap-4">
                       <div className="flex items-center space-x-3 flex-1 min-w-[280px]">
                         <span className="text-sm font-semibold text-slate-600 whitespace-nowrap">選擇查看媒體：</span>
@@ -721,9 +661,11 @@
 
                     {currentMediaGroup ? (
                       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                        {/* 左側：媒體集購大總額卡片 */}
                         <div className="lg:col-span-1 space-y-6">
                           <div className="bg-gradient-to-br from-slate-900 to-slate-800 text-white p-6 rounded-xl shadow-md space-y-4">
+                            <span className="text-xs font-semibold text-blue-400 uppercase">
+                              跨展集購談判池 (Consolidated Procurement)
+                            </span>
                             <h2 className="text-2xl font-bold text-white border-b border-slate-700 pb-3">
                               {currentMediaGroup.mediaName}
                             </h2>
@@ -746,12 +688,10 @@
                           </div>
                         </div>
 
-                        {/* 右側：參與展覽明細與走期甘特圖 */}
                         <div className="lg:col-span-2 space-y-6">
-                          {/* 各媒體廣告走期圖表化 */}
                           <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200 space-y-4">
                             <h4 className="font-bold text-slate-800 text-sm flex items-center">
-                              <span className="mr-2">📈</span> {currentMediaGroup.mediaName} - 廣告走期對照圖 (依時間排序)
+                              <span className="mr-2">📈</span> {currentMediaGroup.mediaName} - 各展投放走期對照圖 (依時間排序)
                             </h4>
 
                             <div className="border border-slate-200 rounded-lg p-4 bg-slate-50/50 space-y-3">
@@ -792,7 +732,6 @@
                             </div>
                           </div>
 
-                          {/* 參與本媒體投放之展覽明細 */}
                           <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
                             <div className="p-4 bg-slate-50 border-b border-slate-200 flex justify-between items-center">
                               <h3 className="font-bold text-slate-800 text-sm">參與本媒體投放之展覽明細</h3>
@@ -836,10 +775,9 @@
                   </div>
                 )}
 
-                {/* 3. 總體數據儀表板 (Dashboard) */}
+                {/* 3. 總體數據儀表板 */}
                 {activeTab === 'dashboard' && (
                   <div className="space-y-6">
-                    {/* 總體關鍵指標 KPI */}
                     <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
                       <div className="bg-white p-5 rounded-xl shadow-sm border border-slate-200">
                         <span className="text-xs font-semibold text-slate-500">登錄展覽總數</span>
@@ -873,10 +811,9 @@
                       </div>
                     </div>
 
-                    {/* 媒體採購熱門排行榜 */}
                     <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200">
                       <h3 className="font-bold text-slate-800 text-base mb-4 flex items-center">
-                        <span className="mr-2">🏆</span> 媒體廣宣排行
+                        <span className="mr-2">🏆</span> 全館展覽媒體需求熱門排行榜 (依公關組建議總額)
                       </h3>
 
                       <div className="space-y-4">
@@ -916,7 +853,7 @@
             )}
           </main>
 
-          {/* 新增 / 編輯展覽 Modal */}
+          {/* Modal */}
           {isModalOpen && (
             <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto">
               <div className="bg-white rounded-2xl shadow-xl max-w-3xl w-full max-h-[90vh] flex flex-col overflow-hidden">
@@ -1065,7 +1002,7 @@
                       取消
                     </button>
                     <button type="submit" className="px-5 py-2 text-sm bg-blue-600 hover:bg-blue-700 text-white font-medium rounded-lg shadow">
-                      儲存展覽需求
+                      儲存並同步至雲端
                     </button>
                   </div>
                 </form>
@@ -1073,7 +1010,6 @@
             </div>
           )}
 
-          {/* Footer */}
           <footer className="bg-slate-900 text-slate-400 py-4 border-t border-slate-800 text-center text-xs">
             外貿協會公關組 內部專用工具 &copy; {new Date().getFullYear()} Taiwan External Trade Development Council
           </footer>
