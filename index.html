@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>外貿協會公關組 - 跨展覽媒體採購與預算整合管理系統 (GAS 雲端共編版)</title>
+  <title>外貿協會公關組 - 媒體採購與預算整合管理系統 (GAS 雲端共編)</title>
   <!-- React & ReactDOM -->
   <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
   <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
@@ -15,6 +15,8 @@
     @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@300;400;500;700&display=swap');
     body { font-family: 'Noto Sans TC', sans-serif; }
   </style>
+  <!-- 網站書籤圖示 -->
+<link rel="icon" type="image/png" href="./favicon.png">
 </head>
 <body class="bg-slate-50 text-slate-800">
   <div id="root"></div>
@@ -22,14 +24,13 @@
   <script type="text/babel">
     const { useState, useEffect, useMemo } = React;
 
-    // ⚠️ 請將下方的網址替換為您第一步部署 Apps Script 後取得的 Web App URL
+    // ⚠️ 請將下方的網址替換為您部署 Apps Script 後取得的 Web App URL
     const GAS_WEB_APP_URL = "https://script.google.com/macros/s/AKfycbzFYzNAij9SbKi83N3lQS5k__dVulfSzjZtoVeqFy7c1P-Gf-7U0F8KecSiw6FDGNtV/exec";
 
     const PRESET_MEDIA_LIST = [
       "工商時報", "經濟日報", "數位時代", "商業周刊", 
       "天下雜誌", "今周刊", "中央社", "自由時報", 
-      "聯合報", "中國時報", "Technice 科技島", "TechNews 科技新報",
-      "Facebook / Instagram 廣告", "Google Search / Display 廣告", "LinkedIn 廣告"
+      "聯合報", "中國時報"
     ];
 
     function App() {
@@ -38,7 +39,6 @@
       const [selectedMediaName, setSelectedMediaName] = useState('');
       const [filteredExhibitionIds, setFilteredExhibitionIds] = useState([]);
 
-      // 雲端同步狀態標示
       const [isLoading, setIsLoading] = useState(false);
       const [isSaving, setIsSaving] = useState(false);
       const [syncStatus, setSyncStatus] = useState('已連線至雲端資料庫');
@@ -54,7 +54,19 @@
         mediaItems: []
       });
 
-      // 從 Google Apps Script (Google Sheet) 讀取最新雲端共編資料
+      // 💡 動態收集：結合預設媒體庫 + 歷史已輸入過的所有媒體名稱
+      const dynamicMediaList = useMemo(() => {
+        const mediaSet = new Set(PRESET_MEDIA_LIST);
+        exhibitions.forEach(ex => {
+          (ex.mediaItems || []).forEach(item => {
+            if (item.name && item.name.trim() !== '') {
+              mediaSet.add(item.name.trim());
+            }
+          });
+        });
+        return Array.from(mediaSet);
+      }, [exhibitions]);
+
       const fetchCloudData = async () => {
         if (!GAS_WEB_APP_URL || GAS_WEB_APP_URL.includes('YOUR_SCRIPT_ID_HERE')) {
           setSyncStatus('尚未設定 GAS URL (目前使用單機模式)');
@@ -78,7 +90,6 @@
         }
       };
 
-      // 儲存資料同步至 Google Apps Script
       const saveCloudData = async (newData) => {
         setExhibitions(newData);
         if (!GAS_WEB_APP_URL || GAS_WEB_APP_URL.includes('YOUR_SCRIPT_ID_HERE')) {
@@ -372,7 +383,7 @@
                     activeTab === 'exhibitions' ? 'bg-blue-600 text-white shadow' : 'text-slate-300 hover:text-white hover:bg-slate-700/50'
                   }`}
                 >
-                  展覽視角 (需求管理)
+                  依展覽 (需求管理)
                 </button>
                 <button
                   onClick={() => setActiveTab('media')}
@@ -380,7 +391,7 @@
                     activeTab === 'media' ? 'bg-blue-600 text-white shadow' : 'text-slate-300 hover:text-white hover:bg-slate-700/50'
                   }`}
                 >
-                  媒體視角 (集購大總額)
+                  依媒體 (採購參考)
                 </button>
                 <button
                   onClick={() => setActiveTab('dashboard')}
@@ -433,7 +444,7 @@
                 </div>
                 <h3 className="text-xl font-bold text-slate-800 mb-2">目前尚無展覽媒體需求資料</h3>
                 <p className="text-slate-500 text-sm max-w-md mx-auto mb-6">
-                  點擊右上角「新增展覽」新增需求，所有輸入的資料都會自動即時同步給全組同仁！
+                  點擊右上角「新增展覽」新增需求，所有輸入的資料都會自動即時同步
                 </p>
                 <button onClick={() => handleOpenModal()} className="bg-blue-600 hover:bg-blue-700 text-white px-5 py-2 rounded-lg font-medium text-sm shadow">
                   + 開始新增第一個展覽需求
@@ -443,7 +454,7 @@
 
             {exhibitions.length > 0 && (
               <>
-                {/* 1. 展覽視角 */}
+                {/* 1. 依展覽 */}
                 {activeTab === 'exhibitions' && (
                   <div className="space-y-6">
                     <div className="bg-white p-4 rounded-xl shadow-sm border border-slate-200 space-y-3">
@@ -482,10 +493,10 @@
                       </div>
                     </div>
 
-                    {/* 各展覽廣告走期甘特圖 */}
+                    {/* 廣告走期 */}
                     <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200 space-y-4">
                       <h3 className="font-bold text-slate-800 text-base flex items-center">
-                        <span className="mr-2">📊</span> 各展覽媒體廣告投放走期甘特圖 (依時間排序)
+                        <span className="mr-2">📊</span> 各展覽媒體廣告走期
                       </h3>
 
                       <div className="border border-slate-200 rounded-lg p-4 bg-slate-50/50 space-y-3">
@@ -584,7 +595,7 @@
 
                                 <div className="p-4 bg-slate-50 rounded-xl space-y-2 border border-slate-200/70">
                                   <div className="flex justify-between items-center text-sm">
-                                    <span className="text-slate-700 font-medium">展覽處欲投放加總：</span>
+                                    <span className="text-slate-700 font-medium">承辦欲投放加總：</span>
                                     <span className="font-bold text-slate-900 text-base">NT$ {totalExAllocated.toLocaleString()}</span>
                                   </div>
                                   <div className="flex justify-between items-center text-sm pt-1 border-t border-slate-200/60">
@@ -639,7 +650,7 @@
                   </div>
                 )}
 
-                {/* 2. 媒體視角 */}
+                {/* 2. 依媒體 */}
                 {activeTab === 'media' && (
                   <div className="space-y-6">
                     <div className="bg-white p-4 rounded-xl shadow-sm border border-slate-200 flex flex-wrap items-center justify-between gap-4">
@@ -663,9 +674,6 @@
                       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
                         <div className="lg:col-span-1 space-y-6">
                           <div className="bg-gradient-to-br from-slate-900 to-slate-800 text-white p-6 rounded-xl shadow-md space-y-4">
-                            <span className="text-xs font-semibold text-blue-400 uppercase">
-                              跨展集購談判池 (Consolidated Procurement)
-                            </span>
                             <h2 className="text-2xl font-bold text-white border-b border-slate-700 pb-3">
                               {currentMediaGroup.mediaName}
                             </h2>
@@ -993,8 +1001,9 @@
                     </div>
                   </div>
 
+                  {/* 💡 動態媒體下拉選單：讀取 dynamicMediaList */}
                   <datalist id="media-presets">
-                    {PRESET_MEDIA_LIST.map(m => (<option key={m} value={m} />))}
+                    {dynamicMediaList.map(m => (<option key={m} value={m} />))}
                   </datalist>
 
                   <div className="pt-4 border-t border-slate-200 flex justify-end space-x-3">
