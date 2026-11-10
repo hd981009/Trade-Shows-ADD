@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>外貿協會公關組 - 媒體採購與預算整合管理系統 (GAS 雲端共編)</title>
+  <title>外貿協會 - 各單位媒體採購與預算整合管理系統 (GAS 雲端共編版)</title>
   <!-- React & ReactDOM -->
   <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
   <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
@@ -25,16 +25,18 @@
     const { useState, useEffect, useMemo } = React;
 
     // ⚠️ 請將下方的網址替換為您部署 Apps Script 後取得的 Web App URL
-    const GAS_WEB_APP_URL = "https://script.google.com/macros/s/AKfycbzFYzNAij9SbKi83N3lQS5k__dVulfSzjZtoVeqFy7c1P-Gf-7U0F8KecSiw6FDGNtV/exec";
+    const GAS_WEB_APP_URL = "https://script.google.com/macros/s/YOUR_SCRIPT_ID_HERE/exec";
 
     const PRESET_MEDIA_LIST = [
-      "工商時報", "經濟日報", "數位時代", "商業周刊", 
-      "天下雜誌", "今周刊", "中央社", "自由時報", 
+      "工商時報", "經濟日報", "中央社", "自由時報", 
       "聯合報", "中國時報"
     ];
 
     function App() {
       const [exhibitions, setExhibitions] = useState([]);
+      // 媒體年度 KPI 需求清單：格式 [{ id, name, targetKpi }]
+      const [mediaKpis, setMediaKpis] = useState([]);
+
       const [activeTab, setActiveTab] = useState('exhibitions'); 
       const [selectedMediaName, setSelectedMediaName] = useState('');
       const [filteredExhibitionIds, setFilteredExhibitionIds] = useState([]);
@@ -54,7 +56,11 @@
         mediaItems: []
       });
 
-      // 💡 動態收集：結合預設媒體庫 + 歷史已輸入過的所有媒體名稱
+      // 新增 KPI 輸入框狀態
+      const [newKpiName, setNewKpiName] = useState('');
+      const [newKpiTarget, setNewKpiTarget] = useState('');
+
+      // 動態媒體清單 (供選單使用)
       const dynamicMediaList = useMemo(() => {
         const mediaSet = new Set(PRESET_MEDIA_LIST);
         exhibitions.forEach(ex => {
@@ -77,11 +83,20 @@
         try {
           const res = await fetch(GAS_WEB_APP_URL);
           const data = await res.json();
+          // 支援新舊格式相容：若資料包包含 exhibitions 與 mediaKpis
           if (Array.isArray(data)) {
             setExhibitions(data);
             setFilteredExhibitionIds(data.map(e => e.id));
-            setSyncStatus('雲端資料已是最新狀態');
+          } else if (data && typeof data === 'object') {
+            if (Array.isArray(data.exhibitions)) {
+              setExhibitions(data.exhibitions);
+              setFilteredExhibitionIds(data.exhibitions.map(e => e.id));
+            }
+            if (Array.isArray(data.mediaKpis)) {
+              setMediaKpis(data.mediaKpis);
+            }
           }
+          setSyncStatus('雲端資料已是最新狀態');
         } catch (err) {
           console.error('Fetch error:', err);
           setSyncStatus('雲端連線失敗，請檢查網路或 GAS URL 設定');
@@ -90,12 +105,21 @@
         }
       };
 
-      const saveCloudData = async (newData) => {
-        setExhibitions(newData);
+      const saveCloudData = async (newExhibitions, newKpis = mediaKpis) => {
+        setExhibitions(newExhibitions);
+        setMediaKpis(newKpis);
+
+        const payload = {
+          exhibitions: newExhibitions,
+          mediaKpis: newKpis
+        };
+
         if (!GAS_WEB_APP_URL || GAS_WEB_APP_URL.includes('YOUR_SCRIPT_ID_HERE')) {
-          localStorage.setItem('taitra_media_procurement_data', JSON.stringify(newData));
+          localStorage.setItem('taitra_media_procurement_data', JSON.stringify(newExhibitions));
+          localStorage.setItem('taitra_media_kpi_data', JSON.stringify(newKpis));
           return;
         }
+
         setIsSaving(true);
         setSyncStatus('正在寫入 Google Sheet 雲端資料庫...');
         try {
@@ -103,7 +127,7 @@
             method: 'POST',
             mode: 'no-cors',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(newData)
+            body: JSON.stringify(payload)
           });
           setSyncStatus('雲端共編資料庫同步成功！');
         } catch (err) {
@@ -124,6 +148,7 @@
         }
       }, [exhibitions]);
 
+      // 媒體整合資料計算 (以公關建議預算 prBudget 為基準)
       const mediaProcurementPool = useMemo(() => {
         const map = {};
         exhibitions.forEach(ex => {
@@ -171,6 +196,42 @@
       const currentMediaGroup = useMemo(() => {
         return mediaProcurementPool.find(m => m.mediaName === selectedMediaName) || mediaProcurementPool[0] || null;
       }, [mediaProcurementPool, selectedMediaName]);
+
+      // KPI 計算對應：尋找每個自訂 KPI 媒體目前已分配的公關建議總額
+      const calculatedMediaKpis = useMemo(() => {
+        return mediaKpis.map(kpi => {
+          // 從 mediaProcurementPool 找到對應媒體的總 prBudget
+          const found = mediaProcurementPool.find(m => m.mediaName.toLowerCase() === kpi.name.toLowerCase());
+          const allocatedAmount = found ? found.totalPRRecommended : 0;
+          const target = Number(kpi.targetKpi) || 0;
+          const percentage = target > 0 ? Math.round((allocatedAmount / target) * 100) : 0;
+
+          return {
+            ...kpi,
+            allocatedAmount,
+            percentage
+          };
+        });
+      }, [mediaKpis, mediaProcurementPool]);
+
+      const handleAddMediaKpi = (e) => {
+        e.preventDefault();
+        if (!newKpiName.trim()) return;
+        const newItem = {
+          id: 'KPI-' + Date.now(),
+          name: newKpiName.trim(),
+          targetKpi: Number(newKpiTarget) || 0
+        };
+        const updatedKpis = [...mediaKpis, newItem];
+        saveCloudData(exhibitions, updatedKpis);
+        setNewKpiName('');
+        setNewKpiTarget('');
+      };
+
+      const handleDeleteMediaKpi = (id) => {
+        const updatedKpis = mediaKpis.filter(k => k.id !== id);
+        saveCloudData(exhibitions, updatedKpis);
+      };
 
       const handleOpenModal = (ex = null) => {
         if (ex) {
@@ -258,7 +319,7 @@
           setFilteredExhibitionIds(updatedList.map(e => e.id));
         }
 
-        saveCloudData(updatedList);
+        saveCloudData(updatedList, mediaKpis);
         setIsModalOpen(false);
       };
 
@@ -266,22 +327,8 @@
         if (confirm('確定要刪除此展覽規劃嗎？')) {
           const updatedList = exhibitions.filter(ex => ex.id !== id);
           setFilteredExhibitionIds(prev => prev.filter(exId => exId !== id));
-          saveCloudData(updatedList);
+          saveCloudData(updatedList, mediaKpis);
         }
-      };
-
-      const handleToggleFilter = (id) => {
-        setFilteredExhibitionIds(prev => 
-          prev.includes(id) ? prev.filter(item => item !== id) : [...prev, id]
-        );
-      };
-
-      const handleSelectAllFilter = () => {
-        setFilteredExhibitionIds(exhibitions.map(e => e.id));
-      };
-
-      const handleClearFilter = () => {
-        setFilteredExhibitionIds([]);
       };
 
       const handleExportCSV = () => {
@@ -339,10 +386,6 @@
         return { left: `${leftPercent}%`, width: `${widthPercent}%`, isPlaceholder: false };
       };
 
-      const displayedExhibitions = useMemo(() => {
-        return exhibitions.filter(ex => filteredExhibitionIds.includes(ex.id));
-      }, [exhibitions, filteredExhibitionIds]);
-
       const sortedParticipatingExhibitions = useMemo(() => {
         if (!currentMediaGroup) return [];
         return [...currentMediaGroup.participatingExhibitions].sort((a, b) => {
@@ -383,7 +426,7 @@
                     activeTab === 'exhibitions' ? 'bg-blue-600 text-white shadow' : 'text-slate-300 hover:text-white hover:bg-slate-700/50'
                   }`}
                 >
-                  依展覽 (需求管理)
+                  依展覽 (預算分配)
                 </button>
                 <button
                   onClick={() => setActiveTab('media')}
@@ -444,7 +487,7 @@
                 </div>
                 <h3 className="text-xl font-bold text-slate-800 mb-2">目前尚無展覽媒體需求資料</h3>
                 <p className="text-slate-500 text-sm max-w-md mx-auto mb-6">
-                  點擊右上角「新增展覽」新增需求，所有輸入的資料都會自動即時同步
+                  點擊右上角「新增展覽」新增需求，所有輸入的資料都會自動即時同步給全組同仁！
                 </p>
                 <button onClick={() => handleOpenModal()} className="bg-blue-600 hover:bg-blue-700 text-white px-5 py-2 rounded-lg font-medium text-sm shadow">
                   + 開始新增第一個展覽需求
@@ -454,112 +497,122 @@
 
             {exhibitions.length > 0 && (
               <>
-                {/* 1. 依展覽 */}
+                {/* 1. 依展覽 (預算分配管理主頁面) */}
                 {activeTab === 'exhibitions' && (
                   <div className="space-y-6">
-                    <div className="bg-white p-4 rounded-xl shadow-sm border border-slate-200 space-y-3">
-                      <div className="flex flex-wrap items-center justify-between gap-2">
-                        <span className="text-sm font-bold text-slate-800 flex items-center">
-                          <span className="mr-2">🔍</span> 篩選顯示展覽：
-                        </span>
-                        <div className="flex items-center space-x-2">
-                          <button onClick={handleSelectAllFilter} className="text-xs bg-slate-100 hover:bg-slate-200 text-slate-700 px-2.5 py-1 rounded border border-slate-300 font-medium">
-                            全選
-                          </button>
-                          <button onClick={handleClearFilter} className="text-xs bg-slate-100 hover:bg-slate-200 text-slate-700 px-2.5 py-1 rounded border border-slate-300 font-medium">
-                            全取消
-                          </button>
-                        </div>
-                      </div>
-
-                      <div className="flex flex-wrap gap-2 pt-1">
-                        {exhibitions.map(ex => {
-                          const isSelected = filteredExhibitionIds.includes(ex.id);
-                          return (
-                            <button
-                              key={ex.id}
-                              onClick={() => handleToggleFilter(ex.id)}
-                              className={`px-3 py-1.5 rounded-lg text-xs font-semibold border transition-all flex items-center space-x-1.5 ${
-                                isSelected 
-                                  ? 'bg-blue-50 border-blue-300 text-blue-700 shadow-sm' 
-                                  : 'bg-slate-50 border-slate-200 text-slate-400 line-through'
-                              }`}
-                            >
-                              <span>{ex.name}</span>
-                              <span className="text-[10px] opacity-75">({ex.department})</span>
-                            </button>
-                          );
-                        })}
-                      </div>
-                    </div>
-
-                    {/* 廣告走期 */}
+                    {/* 媒體年度 KPI 需求與分配追蹤區塊 */}
                     <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200 space-y-4">
-                      <h3 className="font-bold text-slate-800 text-base flex items-center">
-                        <span className="mr-2">📊</span> 各展覽媒體廣告走期
-                      </h3>
-
-                      <div className="border border-slate-200 rounded-lg p-4 bg-slate-50/50 space-y-3">
-                        <div className="flex justify-between text-[11px] text-slate-400 border-b border-slate-200 pb-2 font-mono">
-                          <span>01月</span><span>03月</span><span>05月</span><span>07月</span><span>09月</span><span>11月</span><span>12月</span>
+                      <div className="flex flex-wrap items-center justify-between gap-4 border-b border-slate-100 pb-3">
+                        <div>
+                          <h3 className="font-bold text-slate-800 text-base flex items-center">
+                            <span className="mr-2">🎯</span> 媒體年度 KPI 需求與預算分配追蹤
+                          </h3>
+                          <p className="text-xs text-slate-500 mt-0.5">
+                            在此自主設定要追蹤的媒體與 KPI 目標，系統將自動從下方各展覽的「公關組建議預算」加總目前已分配額度。
+                          </p>
                         </div>
+                      </div>
 
-                        <div className="space-y-3">
-                          {displayedExhibitions.map(ex => {
-                            const sortedMediaItems = [...(ex.mediaItems || [])].sort((a, b) => {
-                              const dateA = a.startDate ? new Date(a.startDate).getTime() : Infinity;
-                              const dateB = b.startDate ? new Date(b.startDate).getTime() : Infinity;
-                              if (dateA !== dateB) return dateA - dateB;
-                              const endDateA = a.endDate ? new Date(a.endDate).getTime() : Infinity;
-                              const endDateB = b.endDate ? new Date(b.endDate).getTime() : Infinity;
-                              if (endDateA !== endDateB) return endDateA - endDateB;
-                              return a.name.localeCompare(b.name, 'zh-TW');
-                            });
+                      {/* 新增 KPI 表單 */}
+                      <form onSubmit={handleAddMediaKpi} className="flex flex-wrap gap-2 items-end bg-slate-50 p-3 rounded-lg border border-slate-200">
+                        <div className="flex-1 min-w-[200px]">
+                          <label className="block text-[11px] font-semibold text-slate-600 mb-1">媒體名稱</label>
+                          <input
+                            type="text"
+                            list="media-presets"
+                            required
+                            placeholder="例如：自由時報"
+                            value={newKpiName}
+                            onChange={(e) => setNewKpiName(e.target.value)}
+                            className="w-full text-xs p-2 bg-white border border-slate-300 rounded focus:ring-blue-500"
+                          />
+                        </div>
+                        <div className="w-[180px]">
+                          <label className="block text-[11px] font-semibold text-slate-600 mb-1">年度 KPI 需求金額 (NT$)</label>
+                          <input
+                            type="number"
+                            required
+                            placeholder="例如：100000"
+                            value={newKpiTarget}
+                            onChange={(e) => setNewKpiTarget(e.target.value)}
+                            className="w-full text-xs p-2 bg-white border border-slate-300 rounded focus:ring-blue-500"
+                          />
+                        </div>
+                        <div>
+                          <button
+                            type="submit"
+                            className="bg-blue-600 hover:bg-blue-700 text-white text-xs px-4 py-2 rounded font-medium shadow transition-all"
+                          >
+                            + 新增 KPI 追蹤
+                          </button>
+                        </div>
+                      </form>
 
+                      {/* KPI 統計列表 */}
+                      {calculatedMediaKpis.length > 0 ? (
+                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 pt-2">
+                          {calculatedMediaKpis.map(kpi => {
+                            const isAchieved = kpi.allocatedAmount >= kpi.targetKpi;
                             return (
-                              <div key={ex.id} className="space-y-1">
-                                <div className="flex justify-between text-xs font-bold text-slate-700">
-                                  <span>{ex.name} <span className="text-[11px] font-normal text-slate-500">({ex.department})</span></span>
+                              <div key={kpi.id} className="p-4 bg-slate-50 rounded-xl border border-slate-200 relative group space-y-3">
+                                <button
+                                  onClick={() => handleDeleteMediaKpi(kpi.id)}
+                                  title="刪除此 KPI 追蹤"
+                                  className="absolute top-3 right-3 text-slate-400 hover:text-rose-600 text-xs font-bold"
+                                >
+                                  ✕
+                                </button>
+                                
+                                <div>
+                                  <span className="text-xs font-semibold text-blue-600 block mb-0.5">媒體追蹤</span>
+                                  <h4 className="font-bold text-slate-800 text-base">{kpi.name}</h4>
                                 </div>
-                                <div className="space-y-1.5">
-                                  {sortedMediaItems.map((item, idx) => {
-                                    const pos = calculateTimelinePosition(item.startDate, item.endDate);
-                                    return (
-                                      <div key={idx} className="relative h-7 bg-slate-200/60 rounded flex items-center px-2">
-                                        <span className="text-[11px] font-semibold text-slate-700 z-10 truncate w-1/3">
-                                          {item.name}
-                                        </span>
-                                        <div className="absolute inset-y-1 right-2 left-1/3 bg-slate-100 rounded overflow-hidden">
-                                          {!pos.isPlaceholder ? (
-                                            <div
-                                              className="group relative h-full bg-blue-600/85 hover:bg-blue-500 rounded transition-colors cursor-pointer shadow-sm"
-                                              style={{ left: pos.left, width: pos.width }}
-                                            >
-                                              <div className="opacity-0 group-hover:opacity-100 pointer-events-none absolute bottom-full left-1/2 -translate-x-1/2 mb-2 px-3 py-1.5 bg-slate-900 text-white text-[11px] rounded-md whitespace-nowrap shadow-xl z-30 transition-opacity">
-                                                <div className="font-bold border-b border-slate-700 pb-0.5 mb-0.5">{item.name}</div>
-                                                <div>{item.startDate || '未定'} ~ {item.endDate || '未定'}</div>
-                                              </div>
-                                            </div>
-                                          ) : (
-                                            <div className="w-full h-full flex items-center justify-center text-[10px] text-slate-400">
-                                              未設定走期
-                                            </div>
-                                          )}
-                                        </div>
-                                      </div>
-                                    );
-                                  })}
+
+                                <div className="grid grid-cols-2 gap-2 text-xs bg-white p-2.5 rounded border border-slate-100">
+                                  <div>
+                                    <span className="text-slate-400 block text-[10px]">年度 KPI 目標</span>
+                                    <span className="font-bold text-slate-700">NT$ {kpi.targetKpi.toLocaleString()}</span>
+                                  </div>
+                                  <div>
+                                    <span className="text-slate-400 block text-[10px]">目前已分配統計</span>
+                                    <span className={`font-bold ${isAchieved ? 'text-emerald-600' : 'text-blue-600'}`}>
+                                      NT$ {kpi.allocatedAmount.toLocaleString()}
+                                    </span>
+                                  </div>
+                                </div>
+
+                                <div>
+                                  <div className="flex justify-between text-[11px] text-slate-500 mb-1">
+                                    <span>達成率</span>
+                                    <span className="font-semibold">{kpi.percentage}%</span>
+                                  </div>
+                                  <div className="w-full bg-slate-200 h-2 rounded-full overflow-hidden">
+                                    <div
+                                      className={`h-full rounded-full transition-all duration-500 ${isAchieved ? 'bg-emerald-500' : 'bg-blue-600'}`}
+                                      style={{ width: `${Math.min(kpi.percentage, 100)}%` }}
+                                    ></div>
+                                  </div>
                                 </div>
                               </div>
                             );
                           })}
                         </div>
-                      </div>
+                      ) : (
+                        <div className="text-center py-6 text-slate-400 text-xs bg-slate-50/50 rounded-lg border border-dashed border-slate-200">
+                          尚未設定任何媒體年度 KPI 需求。請透過上方表單新增您希望追蹤的媒體與目標金額。
+                        </div>
+                      )}
                     </div>
 
-                    {/* 詳細需求卡片 */}
+                    {/* 所有展覽需求與預算分配詳細清單 */}
                     <div className="space-y-6">
-                      {displayedExhibitions.map(ex => {
+                      <div className="flex justify-between items-center px-1">
+                        <h3 className="font-bold text-slate-800 text-base flex items-center">
+                          <span className="mr-2">📋</span> 各展覽媒體預算分配與需求明細 (共 {exhibitions.length} 展)
+                        </h3>
+                      </div>
+
+                      {exhibitions.map(ex => {
                         const totalExAllocated = (ex.mediaItems || []).reduce((sum, item) => sum + (Number(item.exBudget) || 0), 0);
                         const totalPRAllocated = (ex.mediaItems || []).reduce((sum, item) => sum + (Number(item.prBudget) || 0), 0);
                         const maxBudget = ex.totalBudget || 0;
@@ -585,9 +638,10 @@
                             </div>
 
                             <div className="p-6 grid grid-cols-1 lg:grid-cols-3 gap-6">
+                              {/* 左側預算分配指標 */}
                               <div className="space-y-4 lg:col-span-1 border-b lg:border-b-0 lg:border-r border-slate-100 pb-4 lg:pb-0 lg:pr-6">
                                 <div className="flex items-baseline justify-between flex-wrap gap-1">
-                                  <span className="text-sm font-semibold text-slate-600">預算上限：</span>
+                                  <span className="text-sm font-semibold text-slate-600">預算總額上限：</span>
                                   <span className="text-2xl font-extrabold text-slate-900">
                                     NT$ {maxBudget.toLocaleString()}
                                   </span>
@@ -595,14 +649,14 @@
 
                                 <div className="p-4 bg-slate-50 rounded-xl space-y-2 border border-slate-200/70">
                                   <div className="flex justify-between items-center text-sm">
-                                    <span className="text-slate-700 font-medium">承辦欲投放加總：</span>
-                                    <span className="font-bold text-slate-900 text-base">NT$ {totalExAllocated.toLocaleString()}</span>
-                                  </div>
-                                  <div className="flex justify-between items-center text-sm pt-1 border-t border-slate-200/60">
-                                    <span className="text-slate-700 font-medium">公關組建議加總：</span>
+                                    <span className="text-slate-700 font-medium">目前分配額度(建議)：</span>
                                     <span className={`font-extrabold text-lg ${isOverBudget ? 'text-rose-600' : 'text-emerald-600'}`}>
                                       NT$ {totalPRAllocated.toLocaleString()}
                                     </span>
+                                  </div>
+                                  <div className="flex justify-between items-center text-xs pt-1 border-t border-slate-200/60 text-slate-500">
+                                    <span>展覽處原欲投放加總：</span>
+                                    <span>NT$ {totalExAllocated.toLocaleString()}</span>
                                   </div>
                                 </div>
 
@@ -618,13 +672,14 @@
                                 )}
                               </div>
 
+                              {/* 右側媒體清單 */}
                               <div className="lg:col-span-2 overflow-x-auto">
                                 <table className="w-full text-sm text-left text-slate-600">
                                   <thead className="text-xs text-slate-700 uppercase bg-slate-100/80 border-b border-slate-200">
                                     <tr>
                                       <th className="px-3 py-2">擬投放媒體</th>
-                                      <th className="px-3 py-2 text-right">原預算</th>
-                                      <th className="px-3 py-2 text-right">建議預算</th>
+                                      <th className="px-3 py-2 text-right">展覽處原預算</th>
+                                      <th className="px-3 py-2 text-right">公關組建議預算</th>
                                       <th className="px-3 py-2">預計廣告走期</th>
                                     </tr>
                                   </thead>
@@ -632,7 +687,7 @@
                                     {(ex.mediaItems || []).map(item => (
                                       <tr key={item.id} className="hover:bg-slate-50">
                                         <td className="px-3 py-2 font-semibold text-slate-800">{item.name}</td>
-                                        <td className="px-3 py-2 text-right">NT$ {(Number(item.exBudget) || 0).toLocaleString()}</td>
+                                        <td className="px-3 py-2 text-right text-slate-500">NT$ {(Number(item.exBudget) || 0).toLocaleString()}</td>
                                         <td className="px-3 py-2 text-right font-bold text-blue-600">NT$ {(Number(item.prBudget) || 0).toLocaleString()}</td>
                                         <td className="px-3 py-2 text-xs text-slate-500">
                                           {item.startDate || item.endDate ? `${item.startDate || '未定'} ~ ${item.endDate || '未定'}` : '未定'}
@@ -650,7 +705,7 @@
                   </div>
                 )}
 
-                {/* 2. 依媒體 */}
+                {/* 2. 依媒體 (採購參考) */}
                 {activeTab === 'media' && (
                   <div className="space-y-6">
                     <div className="bg-white p-4 rounded-xl shadow-sm border border-slate-200 flex flex-wrap items-center justify-between gap-4">
@@ -680,7 +735,7 @@
 
                             <div className="space-y-4 pt-1">
                               <div>
-                                <span className="text-xs text-slate-400 block mb-1">規劃投放總金額 (公關組建議加總)</span>
+                                <span className="text-xs text-slate-400 block mb-1">規劃投放總金額 (依公關組建議加總)</span>
                                 <span className="text-3xl font-extrabold text-blue-400">
                                   NT$ {currentMediaGroup.totalPRRecommended.toLocaleString()}
                                 </span>
@@ -697,53 +752,9 @@
                         </div>
 
                         <div className="lg:col-span-2 space-y-6">
-                          <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200 space-y-4">
-                            <h4 className="font-bold text-slate-800 text-sm flex items-center">
-                              <span className="mr-2">📈</span> {currentMediaGroup.mediaName} - 各展投放走期對照圖 (依時間排序)
-                            </h4>
-
-                            <div className="border border-slate-200 rounded-lg p-4 bg-slate-50/50 space-y-3">
-                              <div className="flex justify-between text-[11px] text-slate-400 border-b border-slate-200 pb-2 font-mono">
-                                <span>01月</span><span>03月</span><span>05月</span><span>07月</span><span>09月</span><span>11月</span><span>12月</span>
-                              </div>
-                              <div className="space-y-2">
-                                {sortedParticipatingExhibitions.map((item, idx) => {
-                                  const pos = calculateTimelinePosition(item.startDate, item.endDate);
-                                  return (
-                                    <div key={idx} className="space-y-1">
-                                      <div className="flex justify-between text-xs font-bold text-slate-700">
-                                        <span>{item.exhibitionName} <span className="text-[10px] font-normal text-slate-500">({item.department})</span></span>
-                                      </div>
-                                      <div className="relative h-7 bg-slate-100 rounded flex items-center px-2 border border-slate-200">
-                                        <div className="absolute inset-y-1 right-2 left-2 overflow-hidden">
-                                          {!pos.isPlaceholder ? (
-                                            <div
-                                              className="group relative h-full bg-blue-600/85 hover:bg-blue-500 rounded transition-colors cursor-pointer shadow-sm"
-                                              style={{ left: pos.left, width: pos.width }}
-                                            >
-                                              <div className="opacity-0 group-hover:opacity-100 pointer-events-none absolute bottom-full left-1/2 -translate-x-1/2 mb-2 px-3 py-1.5 bg-slate-900 text-white text-[11px] rounded-md whitespace-nowrap shadow-xl z-30 transition-opacity">
-                                                <div className="font-bold border-b border-slate-700 pb-0.5 mb-0.5">{item.exhibitionName}</div>
-                                                <div>{item.startDate || '未定'} ~ {item.endDate || '未定'}</div>
-                                              </div>
-                                            </div>
-                                          ) : (
-                                            <div className="w-full h-full flex items-center justify-center text-[10px] text-slate-400">
-                                              未設定走期
-                                            </div>
-                                          )}
-                                        </div>
-                                      </div>
-                                    </div>
-                                  );
-                                })}
-                              </div>
-                            </div>
-                          </div>
-
                           <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
                             <div className="p-4 bg-slate-50 border-b border-slate-200 flex justify-between items-center">
                               <h3 className="font-bold text-slate-800 text-sm">參與本媒體投放之展覽明細</h3>
-                              <span className="text-xs text-slate-500">可作為議價籌碼數據</span>
                             </div>
 
                             <div className="overflow-x-auto">
@@ -786,6 +797,7 @@
                 {/* 3. 總體數據儀表板 */}
                 {activeTab === 'dashboard' && (
                   <div className="space-y-6">
+                    {/* 總體關鍵指標 KPI */}
                     <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
                       <div className="bg-white p-5 rounded-xl shadow-sm border border-slate-200">
                         <span className="text-xs font-semibold text-slate-500">登錄展覽總數</span>
@@ -819,9 +831,74 @@
                       </div>
                     </div>
 
+                    {/* 廣宣走期甘特圖 */}
+                    <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200 space-y-4">
+                      <h3 className="font-bold text-slate-800 text-base flex items-center">
+                        <span className="mr-2">📊</span> 各展覽媒體廣告投放走期
+                      </h3>
+
+                      <div className="border border-slate-200 rounded-lg p-4 bg-slate-50/50 space-y-3">
+                        <div className="flex justify-between text-[11px] text-slate-400 border-b border-slate-200 pb-2 font-mono">
+                          <span>01月</span><span>03月</span><span>05月</span><span>07月</span><span>09月</span><span>11月</span><span>12月</span>
+                        </div>
+
+                        <div className="space-y-4">
+                          {exhibitions.map(ex => {
+                            const sortedMediaItems = [...(ex.mediaItems || [])].sort((a, b) => {
+                              const dateA = a.startDate ? new Date(a.startDate).getTime() : Infinity;
+                              const dateB = b.startDate ? new Date(b.startDate).getTime() : Infinity;
+                              if (dateA !== dateB) return dateA - dateB;
+                              const endDateA = a.endDate ? new Date(a.endDate).getTime() : Infinity;
+                              const endDateB = b.endDate ? new Date(b.endDate).getTime() : Infinity;
+                              if (endDateA !== endDateB) return endDateA - endDateB;
+                              return a.name.localeCompare(b.name, 'zh-TW');
+                            });
+
+                            return (
+                              <div key={ex.id} className="space-y-1.5 border-b border-slate-100 pb-3">
+                                <div className="flex justify-between text-xs font-bold text-slate-800">
+                                  <span>{ex.name} <span className="text-[11px] font-normal text-slate-500">({ex.department})</span></span>
+                                </div>
+                                <div className="space-y-1.5">
+                                  {sortedMediaItems.map((item, idx) => {
+                                    const pos = calculateTimelinePosition(item.startDate, item.endDate);
+                                    return (
+                                      <div key={idx} className="relative h-7 bg-slate-200/60 rounded flex items-center px-2">
+                                        <span className="text-[11px] font-semibold text-slate-700 z-10 truncate w-1/3">
+                                          {item.name}
+                                        </span>
+                                        <div className="absolute inset-y-1 right-2 left-1/3 bg-slate-100 rounded overflow-hidden">
+                                          {!pos.isPlaceholder ? (
+                                            <div
+                                              className="group relative h-full bg-blue-600/85 hover:bg-blue-500 rounded transition-colors cursor-pointer shadow-sm"
+                                              style={{ left: pos.left, width: pos.width }}
+                                            >
+                                              <div className="opacity-0 group-hover:opacity-100 pointer-events-none absolute bottom-full left-1/2 -translate-x-1/2 mb-2 px-3 py-1.5 bg-slate-900 text-white text-[11px] rounded-md whitespace-nowrap shadow-xl z-30 transition-opacity">
+                                                <div className="font-bold border-b border-slate-700 pb-0.5 mb-0.5">{item.name}</div>
+                                                <div>{item.startDate || '未定'} ~ {item.endDate || '未定'}</div>
+                                              </div>
+                                            </div>
+                                          ) : (
+                                            <div className="w-full h-full flex items-center justify-center text-[10px] text-slate-400">
+                                              未設定走期
+                                            </div>
+                                          )}
+                                        </div>
+                                      </div>
+                                    );
+                                  })}
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* 媒體採購熱門排行榜 */}
                     <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200">
                       <h3 className="font-bold text-slate-800 text-base mb-4 flex items-center">
-                        <span className="mr-2">🏆</span> 全館展覽媒體需求熱門排行榜 (依公關組建議總額)
+                        <span className="mr-2">🏆</span> 廣宣投放媒體排行 (依公關組建議總額)
                       </h3>
 
                       <div className="space-y-4">
@@ -861,7 +938,7 @@
             )}
           </main>
 
-          {/* Modal */}
+          {/* 新增 / 編輯展覽 Modal */}
           {isModalOpen && (
             <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto">
               <div className="bg-white rounded-2xl shadow-xl max-w-3xl w-full max-h-[90vh] flex flex-col overflow-hidden">
@@ -915,7 +992,7 @@
                     <label className="block text-xs font-semibold text-slate-700 mb-1">備註說明 / 宣傳重點</label>
                     <textarea
                       rows="2"
-                      placeholder="例如：此展覽主打海外買主..."
+                      placeholder="例如：此展覽主要投放財經相關媒體..."
                       value={formData.notes}
                       onChange={(e) => setFormData({ ...formData, notes: e.target.value })}
                       className="w-full text-sm p-2.5 bg-slate-50 border border-slate-300 rounded-lg focus:ring-blue-500"
@@ -1001,7 +1078,6 @@
                     </div>
                   </div>
 
-                  {/* 💡 動態媒體下拉選單：讀取 dynamicMediaList */}
                   <datalist id="media-presets">
                     {dynamicMediaList.map(m => (<option key={m} value={m} />))}
                   </datalist>
