@@ -46,6 +46,9 @@
       const [syncStatus, setSyncStatus] = useState('已連線至雲端資料庫');
 
       const [isModalOpen, setIsModalOpen] = useState(false);
+      // 新增 KPI 編輯 Modal 的狀態
+const [isKpiModalOpen, setIsKpiModalOpen] = useState(false);
+const [editingKpi, setEditingKpi] = useState(null); // 格式: { id, name, targetKpi }
       const [editingExhibition, setEditingExhibition] = useState(null);
 
       const [formData, setFormData] = useState({
@@ -59,19 +62,39 @@
       // 新增 KPI 輸入框狀態
       const [newKpiName, setNewKpiName] = useState('');
       const [newKpiTarget, setNewKpiTarget] = useState('');
+      //在媒體KPI窗格加入開啟編輯與儲存編輯的函式
+      const handleOpenKpiModal = (kpi) => {
+  setEditingKpi({ ...kpi });
+  setIsKpiModalOpen(true);
+};
+
+const handleSaveKpiEdit = (e) => {
+  e.preventDefault();
+  const updatedKpis = mediaKpis.map(k => k.id === editingKpi.id ? editingKpi : k);
+  saveCloudData(exhibitions, updatedKpis);
+  setIsKpiModalOpen(false);
+  setEditingKpi(null);
+};
 
       // 動態媒體清單 (供選單使用)
-      const dynamicMediaList = useMemo(() => {
-        const mediaSet = new Set(PRESET_MEDIA_LIST);
-        exhibitions.forEach(ex => {
-          (ex.mediaItems || []).forEach(item => {
-            if (item.name && item.name.trim() !== '') {
-              mediaSet.add(item.name.trim());
-            }
-          });
-        });
-        return Array.from(mediaSet);
-      }, [exhibitions]);
+const dynamicMediaList = useMemo(() => {
+  const mediaSet = new Set(PRESET_MEDIA_LIST);
+  // 1. 納入過去展覽輸入過的媒體
+  exhibitions.forEach(ex => {
+    (ex.mediaItems || []).forEach(item => {
+      if (item.name && item.name.trim() !== '') {
+        mediaSet.add(item.name.trim());
+      }
+    });
+  });
+  // 2. 💡 納入您手動新增的 KPI 追蹤媒體名稱
+  mediaKpis.forEach(kpi => {
+    if (kpi.name && kpi.name.trim() !== '') {
+      mediaSet.add(kpi.name.trim());
+    }
+  });
+  return Array.from(mediaSet);
+}, [exhibitions, mediaKpis]); // 記得把 mediaKpis 加入依賴項
 
       const fetchCloudData = async () => {
         if (!GAS_WEB_APP_URL || GAS_WEB_APP_URL.includes('YOUR_SCRIPT_ID_HERE')) {
@@ -554,12 +577,19 @@
                           {calculatedMediaKpis.map(kpi => {
                             const isAchieved = kpi.allocatedAmount >= kpi.targetKpi;
                             return (
-                              <div key={kpi.id} className="p-4 bg-slate-50 rounded-xl border border-slate-200 relative group space-y-3">
-                                <button
-                                  onClick={() => handleDeleteMediaKpi(kpi.id)}
-                                  title="刪除此 KPI 追蹤"
-                                  className="absolute top-3 right-3 text-slate-400 hover:text-rose-600 text-xs font-bold"
-                                >
+                              <div className="absolute top-3 right-3 flex space-x-2">
+  <button
+    onClick={() => handleOpenKpiModal(kpi)}
+    title="修改 KPI 目標"
+    className="text-slate-400 hover:text-blue-600 text-xs font-bold"
+  >
+    ✏️
+  </button>
+  <button
+    onClick={() => handleDeleteMediaKpi(kpi.id)}
+    title="刪除此 KPI 追蹤"
+    className="text-slate-400 hover:text-rose-600 text-xs font-bold"
+  >
                                   ✕
                                 </button>
                                 
@@ -1094,7 +1124,43 @@
               </div>
             </div>
           )}
-
+{/* ✏️ KPI 編輯 Modal 視窗 */}
+          {isKpiModalOpen && editingKpi && (
+            <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4">
+              <div className="bg-white rounded-2xl shadow-xl max-w-md w-full p-6 space-y-4">
+                <div className="flex justify-between items-center border-b border-slate-100 pb-3">
+                  <h3 className="font-bold text-slate-800 text-lg">✏️ 修改媒體 KPI 目標</h3>
+                  <button onClick={() => setIsKpiModalOpen(false)} className="text-slate-400 hover:text-slate-600 font-bold text-xl px-2">✕</button>
+                </div>
+                <form onSubmit={handleSaveKpiEdit} className="space-y-4">
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-600 mb-1">媒體名稱</label>
+                    <input
+                      type="text"
+                      required
+                      value={editingKpi.name}
+                      onChange={(e) => setEditingKpi({ ...editingKpi, name: e.target.value })}
+                      className="w-full text-sm p-2.5 bg-slate-50 border border-slate-300 rounded-lg focus:ring-blue-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-600 mb-1">年度 KPI 目標金額 (NT$)</label>
+                    <input
+                      type="number"
+                      required
+                      value={editingKpi.targetKpi}
+                      onChange={(e) => setEditingKpi({ ...editingKpi, targetKpi: Number(e.target.value) })}
+                      className="w-full text-sm p-2.5 bg-slate-50 border border-slate-300 rounded-lg focus:ring-blue-500 text-blue-600 font-semibold"
+                    />
+                  </div>
+                  <div className="flex justify-end space-x-2 pt-2 border-t border-slate-100">
+                    <button type="button" onClick={() => setIsKpiModalOpen(false)} className="px-4 py-2 text-sm text-slate-600 hover:bg-slate-100 rounded-lg">取消</button>
+                    <button type="submit" className="px-5 py-2 text-sm bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-medium shadow">儲存修改</button>
+                  </div>
+                </form>
+              </div>
+            </div>
+          )}
           <footer className="bg-slate-900 text-slate-400 py-4 border-t border-slate-800 text-center text-xs">
             外貿協會公關組 內部專用工具 &copy; {new Date().getFullYear()} Taiwan External Trade Development Council
           </footer>
