@@ -676,53 +676,56 @@
 
                         return (
                           <div key={ex.id} className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
-                            {/* 💡 標頭整併：最左側收合按鈕 + 承辦單位 + 活動名稱 + 預算上限 + 分配額度 + 剩餘預算 */}
-                            <div className="p-4 bg-slate-50 border-b border-slate-200 flex flex-wrap justify-between items-center gap-4">
-                              <div className="flex items-center space-x-3">
-                                <button
-                                  onClick={() => handleToggleExhibitionCollapse(ex.id)}
-                                  className="text-xs bg-white hover:bg-slate-100 text-slate-600 border border-slate-300 w-7 h-7 rounded-lg font-bold flex items-center justify-center transition-all shadow-sm"
-                                  title={isExCollapsed ? "展開活動明細" : "收合活動明細"}
-                                >
-                                  {isExCollapsed ? "▶" : "▼"}
-                                </button>
+                         {/* 修改後的標頭：py-2.5 讓上下不佔空間，文字放大 */}
+<div className="py-2.5 px-4 bg-slate-50 border-b border-slate-200 flex flex-wrap justify-between items-center gap-3">
+  <div className="flex items-center space-x-3">
+    {/* 收合按鈕 (稍微修飾大小配合字體) */}
+    <button
+      onClick={() => handleToggleExhibitionCollapse(ex.id)}
+      className="text-xs bg-white hover:bg-slate-100 text-slate-600 border border-slate-300 w-6 h-6 rounded-md font-bold flex items-center justify-center transition-all shadow-sm"
+      title={isExCollapsed ? "展開活動明細" : "收合活動明細"}
+    >
+      {isExCollapsed ? "▶" : "▼"}
+    </button>
 
-                                <span className="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-blue-50 text-blue-700">
-                                  {ex.department}
-                                </span>
-                                <h3 className="text-lg font-bold text-slate-800">{ex.name}</h3>
-                              </div>
+    <span className="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-blue-50 text-blue-700">
+      {ex.department}
+    </span>
+    {/* 💡 活動名稱字體放大為 text-base */}
+    <h3 className="text-base font-bold text-slate-800">{ex.name}</h3>
+  </div>
 
-                              <div className="flex items-center space-x-4 flex-wrap">
-                                <div className="text-xs">
-                                  <span className="text-slate-400 mr-1">預算總額上限:</span>
-                                  <span className="font-extrabold text-slate-900">NT$ {maxBudget.toLocaleString()}</span>
-                                </div>
+  {/* 右側預算資訊：字體放大為 text-sm，但靠 tight 的排版不撐大邊框 */}
+  <div className="flex items-center space-x-4 flex-wrap text-sm">
+    <div>
+      <span className="text-slate-400 mr-1 text-xs">預算總額上限:</span>
+      <span className="font-extrabold text-slate-900">NT$ {maxBudget.toLocaleString()}</span>
+    </div>
 
-                                <div className="text-xs">
-                                  <span className="text-slate-400 mr-1">公關分配額度:</span>
-                                  <span className={`font-bold ${isOverBudget ? 'text-rose-600' : 'text-emerald-600'}`}>
-                                    NT$ {totalPRAllocated.toLocaleString()}
-                                  </span>
-                                </div>
+    <div>
+      <span className="text-slate-400 mr-1 text-xs">公關分配額度:</span>
+      <span className={`font-bold ${isOverBudget ? 'text-rose-600' : 'text-emerald-600'}`}>
+        NT$ {totalPRAllocated.toLocaleString()}
+      </span>
+    </div>
 
-                                <div className="text-xs bg-slate-100 px-3 py-1 rounded-lg border border-slate-200">
-                                  <span className="text-slate-500 mr-1">剩餘可用預算:</span>
-                                  <span className={`font-extrabold ${remainingBudget < 0 ? 'text-rose-600' : 'text-blue-600'}`}>
-                                    NT$ {remainingBudget.toLocaleString()}
-                                  </span>
-                                </div>
+    <div className="bg-white px-2.5 py-0.5 rounded-lg border border-slate-200 shadow-2xs">
+      <span className="text-slate-500 mr-1 text-xs">剩餘可用預算:</span>
+      <span className={`font-extrabold ${remainingBudget < 0 ? 'text-rose-600' : 'text-blue-600'}`}>
+        NT$ {remainingBudget.toLocaleString()}
+      </span>
+    </div>
 
-                                <div className="flex items-center space-x-2 border-l border-slate-300 pl-3">
-                                  <button onClick={() => handleOpenModal(ex)} className="text-xs bg-slate-200/70 hover:bg-slate-200 text-slate-700 px-3 py-1 rounded font-medium">
-                                    ✏️ 編輯
-                                  </button>
-                                  <button onClick={() => handleDeleteExhibition(ex.id)} className="text-xs bg-rose-50 hover:bg-rose-100 text-rose-600 px-3 py-1 rounded font-medium">
-                                    🗑️ 刪除
-                                  </button>
-                                </div>
-                              </div>
-                            </div>
+    <div className="flex items-center space-x-2 border-l border-slate-300 pl-3">
+      <button onClick={() => handleOpenModal(ex)} className="text-xs bg-slate-200/70 hover:bg-slate-200 text-slate-700 px-2.5 py-1 rounded font-medium">
+        ✏️ 編輯
+      </button>
+      <button onClick={() => handleDeleteExhibition(ex.id)} className="text-xs bg-rose-50 hover:bg-rose-100 text-rose-600 px-2.5 py-1 rounded font-medium">
+        🗑️ 刪除
+      </button>
+    </div>
+  </div>
+</div>
 
                             {/* 明細內容 (收合時會完全隱藏) */}
                             {!isExCollapsed && (
