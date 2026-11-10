@@ -47,7 +47,7 @@
       const [isModalOpen, setIsModalOpen] = useState(false);
       const [editingExhibition, setEditingExhibition] = useState(null);
 
-      // 編輯 KPI 彈跳視窗狀態
+      //  KPI 彈跳視窗狀態
       const [isKpiModalOpen, setIsKpiModalOpen] = useState(false);
       const [editingKpi, setEditingKpi] = useState(null);
       const [kpiForm, setKpiForm] = useState({ name: '', targetKpi: '' });
@@ -239,7 +239,7 @@
         }
       };
 
-      //開啟編輯 KPI Modal
+      //開啟 KPI Modal
       const handleOpenKpiModal = (kpi) => {
         setEditingKpi(kpi);
         setKpiForm({ name: kpi.name, targetKpi: kpi.targetKpi });
@@ -579,10 +579,10 @@
                                 <div className="absolute top-3 right-3 flex items-center space-x-1">
                                   <button
                                     onClick={() => handleOpenKpiModal(kpi)}
-                                    title="編輯此 KPI 追蹤"
+                                    title="此 KPI 追蹤"
                                     className="text-slate-400 hover:text-blue-600 text-xs font-bold px-1.5 py-0.5 rounded bg-white border border-slate-200 shadow-sm"
                                   >
-                                    ✏️ 編輯
+                                    ✏️
                                   </button>
                                   <button
                                     onClick={() => handleDeleteMediaKpi(kpi.id)}
