@@ -35,7 +35,14 @@
     function App() {
       const [exhibitions, setExhibitions] = useState([]);
       const [mediaKpis, setMediaKpis] = useState([]);
+// 💡 控制媒體甘特圖展開/收合狀態 (儲存已被展開的媒體名稱)
+const [expandedTimelineMedia, setExpandedTimelineMedia] = useState([]);
 
+const handleToggleTimeline = (mediaName) => {
+  setExpandedTimelineMedia(prev => 
+    prev.includes(mediaName) ? prev.filter(name => name !== mediaName) : [...prev, mediaName]
+  );
+};
       const [activeTab, setActiveTab] = useState('exhibitions'); 
       const [filteredExhibitionIds, setFilteredExhibitionIds] = useState([]);
 
@@ -866,58 +873,121 @@ const  = useMemo(() => {
             <span className="mr-2">📋</span> 各媒體投放展覽明細比對 (每家媒體獨立區塊)
           </h4>
 
-          {selectedMediaGroupList.map(m => {
-            const sortedExhibitions = [...m.participatingExhibitions].sort((a, b) => {
-              const dateA = a.startDate ? new Date(a.startDate).getTime() : Infinity;
-              const dateB = b.startDate ? new Date(b.startDate).getTime() : Infinity;
-              if (dateA !== dateB) return dateA - dateB;
-              return b.prBudget - a.prBudget;
-            });
+{selectedMediaGroupList.map(m => {
+  const isTimelineExpanded = expandedTimelineMedia.includes(m.mediaName);
+  const sortedExhibitions = [...m.participatingExhibitions].sort((a, b) => {
+    const dateA = a.startDate ? new Date(a.startDate).getTime() : Infinity;
+    const dateB = b.startDate ? new Date(b.startDate).getTime() : Infinity;
+    if (dateA !== dateB) return dateA - dateB;
+    return b.prBudget - a.prBudget;
+  });
 
-            return (
-              <div key={m.mediaName} className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
-                <div className="p-4 bg-slate-100 border-b border-slate-200 flex justify-between items-center">
-                  <div className="flex items-center space-x-2">
-                    <span className="w-2.5 h-2.5 rounded-full bg-blue-600"></span>
-                    <h3 className="font-bold text-slate-800 text-base">{m.mediaName}</h3>
-                    <span className="text-xs text-slate-500">({m.exhibitionsCount} 個展覽投放)</span>
-                  </div>
-                  <div className="text-xs font-bold text-blue-700 bg-blue-50 border border-blue-200 px-3 py-1 rounded-full">
-                    公關建議總計：NT$ {m.totalPRRecommended.toLocaleString()}
-                  </div>
-                </div>
+  return (
+    <div key={m.mediaName} className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden space-y-0">
+      {/* 區塊標頭：包含展開/收合甘特圖按鈕 */}
+      <div className="p-4 bg-slate-100 border-b border-slate-200 flex flex-wrap justify-between items-center gap-2">
+        <div className="flex items-center space-x-2">
+          <span className="w-2.5 h-2.5 rounded-full bg-blue-600"></span>
+          <h3 className="font-bold text-slate-800 text-base">{m.mediaName}</h3>
+          <span className="text-xs text-slate-500">({m.exhibitionsCount} 個展覽投放)</span>
+        </div>
+        
+        <div className="flex items-center space-x-2">
+          {/* 💡 折疊/展開甘特圖切換按鈕 */}
+          <button
+            onClick={() => handleToggleTimeline(m.mediaName)}
+            className={`text-xs px-2.5 py-1 rounded font-medium border transition-colors flex items-center space-x-1 ${
+              isTimelineExpanded 
+                ? 'bg-blue-100 border-blue-300 text-blue-700' 
+                : 'bg-white border-slate-300 text-slate-600 hover:bg-slate-50'
+            }`}
+          >
+            <span>📊 {isTimelineExpanded ? '收合走期甘特圖' : '檢視走期甘特圖'}</span>
+          </button>
 
-                <div className="overflow-x-auto">
-                  <table className="w-full text-sm text-left text-slate-600">
-                    <thead className="text-xs text-slate-700 uppercase bg-slate-50 border-b border-slate-200">
-                      <tr>
-                        <th className="px-4 py-3">展覽名稱</th>
-                        <th className="px-4 py-3">承辦單位</th>
-                        <th className="px-4 py-3 text-right">展覽處原預算</th>
-                        <th className="px-4 py-3 text-right">公關組建議金額</th>
-                        <th className="px-4 py-3">預計廣告走期</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-200">
-                      {sortedExhibitions.map((item, idx) => (
-                        <tr key={idx} className="hover:bg-slate-50">
-                          <td className="px-4 py-3 font-semibold text-slate-800">{item.exhibitionName}</td>
-                          <td className="px-4 py-3 text-xs">
-                            <span className="bg-slate-100 px-2 py-0.5 rounded border border-slate-200">{item.department}</span>
-                          </td>
-                          <td className="px-4 py-3 text-right text-slate-500">NT$ {item.exBudget.toLocaleString()}</td>
-                          <td className="px-4 py-3 text-right font-bold text-blue-600">NT$ {item.prBudget.toLocaleString()}</td>
-                          <td className="px-4 py-3 text-xs text-slate-500 whitespace-nowrap">
-                            {item.startDate || item.endDate ? `${item.startDate || '未定'} ~ ${item.endDate || '未定'}` : '未定'}
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-            );
-          })}
+          <div className="text-xs font-bold text-blue-700 bg-blue-50 border border-blue-200 px-3 py-1 rounded-full">
+            公關建議總計：NT$ {m.totalPRRecommended.toLocaleString()}
+          </div>
+        </div>
+      </div>
+
+      {/* 💡 可收合的走期甘特圖區塊 */}
+      {isTimelineExpanded && (
+        <div className="p-4 bg-slate-50/80 border-b border-slate-200 space-y-3 transition-all">
+          <h5 className="font-bold text-xs text-slate-700 flex items-center">
+            <span className="mr-1">📈</span> {m.mediaName} - 各展走期時程表
+          </h5>
+          <div className="border border-slate-200 rounded-lg p-3 bg-white space-y-2">
+            <div className="flex justify-between text-[10px] text-slate-400 border-b border-slate-100 pb-1 font-mono">
+              <span>01月</span><span>03月</span><span>05月</span><span>07月</span><span>09月</span><span>11月</span><span>12月</span>
+            </div>
+            <div className="space-y-2">
+              {sortedExhibitions.map((item, idx) => {
+                const pos = calculateTimelinePosition(item.startDate, item.endDate);
+                return (
+                  <div key={idx} className="space-y-1">
+                    <div className="flex justify-between text-[11px] font-bold text-slate-700">
+                      <span>{item.exhibitionName} <span className="text-[10px] font-normal text-slate-400">({item.department})</span></span>
+                    </div>
+                    <div className="relative h-6 bg-slate-100 rounded flex items-center px-2 border border-slate-200">
+                      <div className="absolute inset-y-1 right-2 left-2 overflow-hidden">
+                        {!pos.isPlaceholder ? (
+                          <div
+                            className="group relative h-full bg-blue-600/85 hover:bg-blue-500 rounded transition-colors cursor-pointer shadow-sm"
+                            style={{ left: pos.left, width: pos.width }}
+                          >
+                            <div className="opacity-0 group-hover:opacity-100 pointer-events-none absolute bottom-full left-1/2 -translate-x-1/2 mb-1 px-2.5 py-1 bg-slate-900 text-white text-[10px] rounded whitespace-nowrap shadow-xl z-30 transition-opacity">
+                              <div className="font-bold">{item.exhibitionName}</div>
+                              <div>{item.startDate || '未定'} ~ {item.endDate || '未定'}</div>
+                            </div>
+                          </div>
+                        ) : (
+                          <div className="w-full h-full flex items-center justify-center text-[10px] text-slate-400">
+                            未設定走期
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 展覽預算表格（維持呈現） */}
+      <div className="overflow-x-auto">
+        <table className="w-full text-sm text-left text-slate-600">
+          <thead className="text-xs text-slate-700 uppercase bg-slate-50 border-b border-slate-200">
+            <tr>
+              <th className="px-4 py-3">展覽名稱</th>
+              <th className="px-4 py-3">承辦單位</th>
+              <th className="px-4 py-3 text-right">展覽處原預算</th>
+              <th className="px-4 py-3 text-right">公關組建議金額</th>
+              <th className="px-4 py-3">預計廣告走期</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-slate-200">
+            {sortedExhibitions.map((item, idx) => (
+              <tr key={idx} className="hover:bg-slate-50">
+                <td className="px-4 py-3 font-semibold text-slate-800">{item.exhibitionName}</td>
+                <td className="px-4 py-3 text-xs">
+                  <span className="bg-slate-100 px-2 py-0.5 rounded border border-slate-200">{item.department}</span>
+                </td>
+                <td className="px-4 py-3 text-right text-slate-500">NT$ {item.exBudget.toLocaleString()}</td>
+                <td className="px-4 py-3 text-right font-bold text-blue-600">NT$ {item.prBudget.toLocaleString()}</td>
+                <td className="px-4 py-3 text-xs text-slate-500 whitespace-nowrap">
+                  {item.startDate || item.endDate ? `${item.startDate || '未定'} ~ ${item.endDate || '未定'}` : '未定'}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+})}
         </div>
       </div>
     ) : (
