@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>外貿協會 - 各單位媒體採購與預算整合管理系統 (GAS 雲端共編版)</title>
+  <title>外貿協會公關組 - 媒體採購與預算整合管理系統 (GAS 雲端共編版)</title>
   <!-- React & ReactDOM -->
   <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
   <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
@@ -29,7 +29,7 @@
 
     const PRESET_MEDIA_LIST = [
       "工商時報", "經濟日報", "商業周刊", 
-      "自由時報", "中國時報"
+      "自由時報", "聯合報", "中國時報"
     ];
 
     function App() {
@@ -37,8 +37,10 @@
       const [mediaKpis, setMediaKpis] = useState([]);
 
       const [activeTab, setActiveTab] = useState('exhibitions'); 
-      const [selectedMediaName, setSelectedMediaName] = useState('');
       const [filteredExhibitionIds, setFilteredExhibitionIds] = useState([]);
+
+      // 💡 媒體視角多選狀態：儲存被勾選的媒體名稱陣列
+      const [selectedMediaNames, setSelectedMediaNames] = useState([]);
 
       const [isLoading, setIsLoading] = useState(false);
       const [isSaving, setIsSaving] = useState(false);
@@ -47,7 +49,7 @@
       const [isModalOpen, setIsModalOpen] = useState(false);
       const [editingExhibition, setEditingExhibition] = useState(null);
 
-      //  KPI 彈跳視窗狀態
+      // 編輯 KPI 彈跳視窗狀態
       const [isKpiModalOpen, setIsKpiModalOpen] = useState(false);
       const [editingKpi, setEditingKpi] = useState(null);
       const [kpiForm, setKpiForm] = useState({ name: '', targetKpi: '' });
@@ -63,7 +65,7 @@
       const [newKpiName, setNewKpiName] = useState('');
       const [newKpiTarget, setNewKpiTarget] = useState('');
 
-      // 💡 動態媒體清單：結合 預設媒體庫 + 歷史展覽填寫的媒體 + 自訂追蹤的 KPI 媒體
+      // 動態媒體清單：結合 預設媒體庫 + 歷史活動填寫的媒體 + 自訂追蹤的 KPI 媒體
       const dynamicMediaList = useMemo(() => {
         const mediaSet = new Set(PRESET_MEDIA_LIST);
         exhibitions.forEach(ex => {
@@ -193,15 +195,58 @@
         return Object.values(map).sort((a, b) => b.totalPRRecommended - a.totalPRRecommended);
       }, [exhibitions]);
 
+      // 初始化媒體多選：預設全選所有已有資料的媒體
       useEffect(() => {
-        if (mediaProcurementPool.length > 0 && !mediaProcurementPool.find(m => m.mediaName === selectedMediaName)) {
-          setSelectedMediaName(mediaProcurementPool[0].mediaName);
+        if (mediaProcurementPool.length > 0 && selectedMediaNames.length === 0) {
+          setSelectedMediaNames(mediaProcurementPool.map(m => m.mediaName));
         }
       }, [mediaProcurementPool]);
 
-      const currentMediaGroup = useMemo(() => {
-        return mediaProcurementPool.find(m => m.mediaName === selectedMediaName) || mediaProcurementPool[0] || null;
-      }, [mediaProcurementPool, selectedMediaName]);
+      // 多選操控函式
+      const handleToggleMediaSelect = (mediaName) => {
+        setSelectedMediaNames(prev => 
+          prev.includes(mediaName) ? prev.filter(name => name !== mediaName) : [...prev, mediaName]
+        );
+      };
+
+      const handleSelectAllMedia = () => {
+        setSelectedMediaNames(mediaProcurementPool.map(m => m.mediaName));
+      };
+
+      const handleClearAllMedia = () => {
+        setSelectedMediaNames([]);
+      };
+
+      // 計算目前勾選媒體的整合數據
+      const selectedMediaGroups = useMemo(() => {
+        return mediaProcurementPool.filter(m => selectedMediaNames.includes(m.mediaName));
+      }, [mediaProcurementPool, selectedMediaNames]);
+
+      const aggregatedSelectedStats = useMemo(() => {
+        let totalPRRecommended = 0;
+        let totalExhibitionBudget = 0;
+        const allParticipating = [];
+
+        selectedMediaGroups.forEach(m => {
+          totalPRRecommended += m.totalPRRecommended;
+          totalExhibitionBudget += m.totalExhibitionBudget;
+          m.participatingExhibitions.forEach(item => {
+            allParticipating.push({
+              ...item,
+              mediaName: m.mediaName
+            });
+          });
+        });
+
+        const uniqueExhibitionsCount = new Set(allParticipating.map(p => p.exhibitionId)).size;
+
+        return {
+          totalPRRecommended,
+          totalExhibitionBudget,
+          uniqueExhibitionsCount,
+          allParticipating
+        };
+      }, [selectedMediaGroups]);
 
       const calculatedMediaKpis = useMemo(() => {
         return mediaKpis.map(kpi => {
@@ -239,7 +284,6 @@
         }
       };
 
-      //開啟 KPI Modal
       const handleOpenKpiModal = (kpi) => {
         setEditingKpi(kpi);
         setKpiForm({ name: kpi.name, targetKpi: kpi.targetKpi });
@@ -345,7 +389,7 @@
       };
 
       const handleDeleteExhibition = (id) => {
-        if (confirm('確定要刪除此規劃嗎？')) {
+        if (confirm('確定要刪除此活動規劃嗎？')) {
           const updatedList = exhibitions.filter(ex => ex.id !== id);
           setFilteredExhibitionIds(prev => prev.filter(exId => exId !== id));
           saveCloudData(updatedList, mediaKpis);
@@ -358,7 +402,7 @@
           return;
         }
         let csvContent = "data:text/csv;charset=utf-8,\uFEFF";
-        csvContent += "媒體名稱,意向活動數,公關組建議規劃總金額,承辦單位原預算總金額,參與活動明細\n";
+        csvContent += "媒體名稱,意向活動數,公關組建議規劃總金額,原預算總金額,參與活動明細\n";
 
         mediaProcurementPool.forEach(m => {
           const exList = m.participatingExhibitions.map(e => `${e.exhibitionName}(${e.department})`).join('; ');
@@ -408,8 +452,7 @@
       };
 
       const sortedParticipatingExhibitions = useMemo(() => {
-        if (!currentMediaGroup) return [];
-        return [...currentMediaGroup.participatingExhibitions].sort((a, b) => {
+        return [...aggregatedSelectedStats.allParticipating].sort((a, b) => {
           const dateA = a.startDate ? new Date(a.startDate).getTime() : Infinity;
           const dateB = b.startDate ? new Date(b.startDate).getTime() : Infinity;
           if (dateA !== dateB) return dateA - dateB;
@@ -417,7 +460,7 @@
           const endDateB = b.endDate ? new Date(b.endDate).getTime() : Infinity;
           return endDateA - endDateB;
         });
-      }, [currentMediaGroup]);
+      }, [aggregatedSelectedStats]);
 
       return (
         <div className="min-h-screen flex flex-col">
@@ -431,7 +474,7 @@
                 <div>
                   <h1 className="text-lg font-bold leading-tight">外貿協會公關組</h1>
                   <div className="flex items-center space-x-2 text-xs text-slate-400">
-                    <span>各單位媒體採購與預算整合管理系統</span>
+                    <span>媒體採購與預算整合管理系統</span>
                     <span className="bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 px-1.5 py-0.5 rounded text-[10px]">
                       ☁️ Google Sheet 共編中
                     </span>
@@ -506,19 +549,19 @@
                 <div className="w-16 h-16 bg-blue-50 text-blue-600 rounded-full flex items-center justify-center mx-auto mb-4 font-bold text-2xl">
                   📋
                 </div>
-                <h3 className="text-xl font-bold text-slate-800 mb-2">目前尚無媒體需求資料</h3>
+                <h3 className="text-xl font-bold text-slate-800 mb-2">目前尚無活動媒體需求資料</h3>
                 <p className="text-slate-500 text-sm max-w-md mx-auto mb-6">
-                  點擊右上角「新增活動」新增需求，所有輸入的資料都會自動即時同步給全組同仁！
+                  點擊右上角「新增活動」，所有輸入的資料都會自動即時同步給全組同仁！
                 </p>
                 <button onClick={() => handleOpenModal()} className="bg-blue-600 hover:bg-blue-700 text-white px-5 py-2 rounded-lg font-medium text-sm shadow">
-                  + 開始新增第一個活動需求
+                  + 開始新增第一個活動廣宣需求
                 </button>
               </div>
             )}
 
             {exhibitions.length > 0 && (
               <>
-                {/* 1. 依活動 (預算分配) */}
+                {/* 1. 依活動 (預算分配管理頁面) */}
                 {activeTab === 'exhibitions' && (
                   <div className="space-y-6">
                     {/* 媒體年度 KPI 需求與分配追蹤區塊 */}
@@ -529,7 +572,7 @@
                             <span className="mr-2">🎯</span> 媒體年度 KPI 需求與預算分配追蹤
                           </h3>
                           <p className="text-xs text-slate-500 mt-0.5">
-                            在此自主設定要追蹤的媒體與 KPI 目標，系統將自動從下方各展覽的「公關組建議預算」加總目前已分配額度。
+                            在此自主設定要追蹤的媒體與 KPI 目標，系統將自動從下方各活動的「公關組建議預算」加總目前已分配額度。
                           </p>
                         </div>
                       </div>
@@ -579,10 +622,10 @@
                                 <div className="absolute top-3 right-3 flex items-center space-x-1">
                                   <button
                                     onClick={() => handleOpenKpiModal(kpi)}
-                                    title="此 KPI 追蹤"
+                                    title="編輯此 KPI 追蹤"
                                     className="text-slate-400 hover:text-blue-600 text-xs font-bold px-1.5 py-0.5 rounded bg-white border border-slate-200 shadow-sm"
                                   >
-                                    ✏️
+                                    ✏️ 編輯
                                   </button>
                                   <button
                                     onClick={() => handleDeleteMediaKpi(kpi.id)}
@@ -685,7 +728,7 @@
                                     </span>
                                   </div>
                                   <div className="flex justify-between items-center text-xs pt-1 border-t border-slate-200/60 text-slate-500">
-                                    <span>各單位原欲投放加總：</span>
+                                    <span>ㄏ活動原欲投放加總：</span>
                                     <span>NT$ {totalExAllocated.toLocaleString()}</span>
                                   </div>
                                 </div>
@@ -708,7 +751,7 @@
                                   <thead className="text-xs text-slate-700 uppercase bg-slate-100/80 border-b border-slate-200">
                                     <tr>
                                       <th className="px-3 py-2">擬投放媒體</th>
-                                      <th className="px-3 py-2 text-right">各活動原預算</th>
+                                      <th className="px-3 py-2 text-right">活動原預算</th>
                                       <th className="px-3 py-2 text-right">公關組建議預算</th>
                                       <th className="px-3 py-2">預計廣告走期</th>
                                     </tr>
@@ -735,65 +778,113 @@
                   </div>
                 )}
 
-                {/* 2. 依媒體 (採購參考) */}
+                {/* 2. 媒體視角 (多選集購整合) */}
                 {activeTab === 'media' && (
                   <div className="space-y-6">
-                    <div className="bg-white p-4 rounded-xl shadow-sm border border-slate-200 flex flex-wrap items-center justify-between gap-4">
-                      <div className="flex items-center space-x-3 flex-1 min-w-[280px]">
-                        <span className="text-sm font-semibold text-slate-600 whitespace-nowrap">選擇查看媒體：</span>
-                        <select
-                          value={selectedMediaName}
-                          onChange={(e) => setSelectedMediaName(e.target.value)}
-                          className="bg-slate-50 border border-slate-300 text-slate-800 text-sm rounded-lg font-semibold focus:ring-blue-500 block w-full p-2.5"
-                        >
-                          {mediaProcurementPool.map(m => (
-                            <option key={m.mediaName} value={m.mediaName}>
-                              {m.mediaName} (共 {m.exhibitionsCount} 個活動，規劃總額 NT$ {m.totalPRRecommended.toLocaleString()})
-                            </option>
-                          ))}
-                        </select>
+                    {/* 💡 媒體多選勾選控制列 */}
+                    <div className="bg-white p-4 rounded-xl shadow-sm border border-slate-200 space-y-3">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <span className="text-sm font-bold text-slate-800 flex items-center">
+                          <span className="mr-2">🔍</span> 選擇要同時比對與觀看的媒體 (可複選)：
+                        </span>
+                        <div className="flex items-center space-x-2">
+                          <button onClick={handleSelectAllMedia} className="text-xs bg-slate-100 hover:bg-slate-200 text-slate-700 px-2.5 py-1 rounded border border-slate-300 font-medium">
+                            全選
+                          </button>
+                          <button onClick={handleClearAllMedia} className="text-xs bg-slate-100 hover:bg-slate-200 text-slate-700 px-2.5 py-1 rounded border border-slate-300 font-medium">
+                            全取消
+                          </button>
+                        </div>
+                      </div>
+
+                      <div className="flex flex-wrap gap-2 pt-1">
+                        {mediaProcurementPool.map(m => {
+                          const isSelected = selectedMediaNames.includes(m.mediaName);
+                          return (
+                            <button
+                              key={m.mediaName}
+                              onClick={() => handleToggleMediaSelect(m.mediaName)}
+                              className={`px-3 py-1.5 rounded-lg text-xs font-semibold border transition-all flex items-center space-x-1.5 ${
+                                isSelected 
+                                  ? 'bg-blue-600 border-blue-700 text-white shadow-sm' 
+                                  : 'bg-slate-50 border-slate-200 text-slate-500 hover:bg-slate-100'
+                              }`}
+                            >
+                              <span>{isSelected ? '✓ ' : ''}{m.mediaName}</span>
+                              <span className={`text-[10px] ${isSelected ? 'text-blue-100' : 'text-slate-400'}`}>
+                                ({m.exhibitionsCount} 展)
+                              </span>
+                            </button>
+                          );
+                        })}
                       </div>
                     </div>
 
-                    {currentMediaGroup ? (
+                    {selectedMediaGroups.length > 0 ? (
                       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                        {/* 左側：多選總計面板 */}
                         <div className="lg:col-span-1 space-y-6">
                           <div className="bg-gradient-to-br from-slate-900 to-slate-800 text-white p-6 rounded-xl shadow-md space-y-4">
-                            <h2 className="text-2xl font-bold text-white border-b border-slate-700 pb-3">
-                              {currentMediaGroup.mediaName}
-                            </h2>
+                            <div className="flex justify-between items-center border-b border-slate-700 pb-3">
+                              <span className="text-xs bg-blue-500/20 text-blue-300 border border-blue-500/30 px-2 py-0.5 rounded-full">
+                                已選取 {selectedMediaGroups.length} 家媒體
+                              </span>
+                            </div>
 
                             <div className="space-y-4 pt-1">
                               <div>
-                                <span className="text-xs text-slate-400 block mb-1">規劃投放總金額 (公關組建議加總)</span>
+                                <span className="text-xs text-slate-400 block mb-1">所選媒體總投額 (公關組建議加總)</span>
                                 <span className="text-3xl font-extrabold text-blue-400">
-                                  NT$ {currentMediaGroup.totalPRRecommended.toLocaleString()}
+                                  NT$ {aggregatedSelectedStats.totalPRRecommended.toLocaleString()}
                                 </span>
                               </div>
 
-                              <div className="pt-2 text-xs">
+                              <div className="pt-2 text-xs space-y-2">
                                 <div className="bg-slate-800/80 p-3 rounded-lg border border-slate-700 flex justify-between items-center">
-                                  <span className="text-slate-400">意向投放活動數</span>
-                                  <span className="text-lg font-bold text-white">{currentMediaGroup.exhibitionsCount} 個活動</span>
+                                  <span className="text-slate-400">活動原預算加總</span>
+                                  <span className="font-bold text-slate-300">NT$ {aggregatedSelectedStats.totalExhibitionBudget.toLocaleString()}</span>
+                                </div>
+                                <div className="bg-slate-800/80 p-3 rounded-lg border border-slate-700 flex justify-between items-center">
+                                  <span className="text-slate-400">涵蓋不重複活動數</span>
+                                  <span className="text-lg font-bold text-white">{aggregatedSelectedStats.uniqueExhibitionsCount} 個活動</span>
                                 </div>
                               </div>
                             </div>
                           </div>
+
+                          {/* 勾選媒體的個別小清單 */}
+                          <div className="bg-white p-4 rounded-xl shadow-sm border border-slate-200 space-y-3">
+                            <h4 className="font-bold text-slate-800 text-xs uppercase tracking-wider text-slate-400">
+                              已勾選媒體個別預算
+                            </h4>
+                            <div className="space-y-2 divide-y divide-slate-100">
+                              {selectedMediaGroups.map(m => (
+                                <div key={m.mediaName} className="pt-2 flex justify-between items-center text-xs">
+                                  <span className="font-semibold text-slate-700">{m.mediaName}</span>
+                                  <span className="font-bold text-blue-600">NT$ {m.totalPRRecommended.toLocaleString()}</span>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
                         </div>
 
+                        {/* 右側：甘特圖與對照表格 */}
                         <div className="lg:col-span-2 space-y-6">
                           <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
                             <div className="p-4 bg-slate-50 border-b border-slate-200 flex justify-between items-center">
-                              <h3 className="font-bold text-slate-800 text-sm">參與本媒體投放之活動明細</h3>
+                              <h3 className="font-bold text-slate-800 text-sm">
+                                勾選媒體之參與明細 (共 {sortedParticipatingExhibitions.length} 筆需求)
+                              </h3>
+                              <span className="text-xs text-slate-500">可作為談判與議價數據</span>
                             </div>
 
                             <div className="overflow-x-auto">
                               <table className="w-full text-sm text-left text-slate-600">
                                 <thead className="text-xs text-slate-700 uppercase bg-slate-100/80 border-b border-slate-200">
                                   <tr>
+                                    <th className="px-4 py-3">媒體名稱</th>
                                     <th className="px-4 py-3">活動名稱</th>
                                     <th className="px-4 py-3">承辦單位</th>
-                                    <th className="px-4 py-3 text-right">活動預算</th>
                                     <th className="px-4 py-3 text-right">公關組建議 (議價基準)</th>
                                     <th className="px-4 py-3">預定走期</th>
                                   </tr>
@@ -801,11 +892,11 @@
                                 <tbody className="divide-y divide-slate-200">
                                   {sortedParticipatingExhibitions.map((item, idx) => (
                                     <tr key={idx} className="hover:bg-slate-50">
+                                      <td className="px-4 py-3 font-bold text-blue-700">{item.mediaName}</td>
                                       <td className="px-4 py-3 font-semibold text-slate-800">{item.exhibitionName}</td>
                                       <td className="px-4 py-3 text-xs">
                                         <span className="bg-slate-100 px-2 py-0.5 rounded border border-slate-200">{item.department}</span>
                                       </td>
-                                      <td className="px-4 py-3 text-right font-medium text-slate-500">NT$ {item.exBudget.toLocaleString()}</td>
                                       <td className="px-4 py-3 text-right font-bold text-blue-600">NT$ {item.prBudget.toLocaleString()}</td>
                                       <td className="px-4 py-3 text-xs text-slate-500 whitespace-nowrap">
                                         {item.startDate || item.endDate ? `${item.startDate || '未定'} ~ ${item.endDate || '未定'}` : '未定'}
@@ -819,12 +910,14 @@
                         </div>
                       </div>
                     ) : (
-                      <div className="bg-white p-8 text-center rounded-xl text-slate-500">尚無任何媒體整合數據</div>
+                      <div className="bg-white p-12 text-center rounded-xl text-slate-400 border border-slate-200">
+                        請在上方勾選至少一家媒體以顯示整合資料
+                      </div>
                     )}
                   </div>
                 )}
 
-                {/* 3. 總體數據儀表板 (含廣告走期一覽) */}
+                {/* 3. 總體數據儀表板 (含廣宣走期) */}
                 {activeTab === 'dashboard' && (
                   <div className="space-y-6">
                     {/* 總體關鍵指標 KPI */}
@@ -840,14 +933,14 @@
                       </div>
 
                       <div className="bg-white p-5 rounded-xl shadow-sm border border-slate-200">
-                        <span className="text-xs font-semibold text-slate-500">預算總額上限 (合計)</span>
+                        <span className="text-xs font-semibold text-slate-500">預算總額上限 (各展合計)</span>
                         <div className="text-2xl font-bold text-indigo-600 mt-1">
                           NT$ {overallStats.grandTotalBudgetLimit.toLocaleString()}
                         </div>
                       </div>
 
                       <div className="bg-white p-5 rounded-xl shadow-sm border border-slate-200">
-                        <span className="text-xs font-semibold text-slate-500">活動需求加總額</span>
+                        <span className="text-xs font-semibold text-slate-500">需求加總額</span>
                         <div className="text-2xl font-bold text-blue-600 mt-1">
                           NT$ {overallStats.grandExBudget.toLocaleString()}
                         </div>
@@ -864,7 +957,7 @@
                     {/* 廣宣走期一覽 */}
                     <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200 space-y-4">
                       <h3 className="font-bold text-slate-800 text-base flex items-center">
-                        <span className="mr-2">📊</span> 各活動預計廣宣走期
+                        <span className="mr-2">📊</span> 各活動媒體廣宣走期一覽
                       </h3>
 
                       <div className="border border-slate-200 rounded-lg p-4 bg-slate-50/50 space-y-3">
@@ -925,10 +1018,10 @@
                       </div>
                     </div>
 
-                    {/* 媒體廣宣投放排行 */}
+                    {/* 媒體廣宣預算排行 */}
                     <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200">
                       <h3 className="font-bold text-slate-800 text-base mb-4 flex items-center">
-                        <span className="mr-2">🏆</span> 活動媒體廣宣需求熱門排行 (依公關組建議總額)
+                        <span className="mr-2">🏆</span> 媒體廣宣預算排行 (依公關組建議總額)
                       </h3>
 
                       <div className="space-y-4">
@@ -1022,7 +1115,7 @@
               <div className="bg-white rounded-2xl shadow-xl max-w-3xl w-full max-h-[90vh] flex flex-col overflow-hidden">
                 <div className="p-5 bg-slate-50 border-b border-slate-200 flex justify-between items-center">
                   <h3 className="font-bold text-slate-800 text-lg">
-                    {editingExhibition ? '✏️ 編輯' : '➕ 新增'}
+                    {editingExhibition ? '✏️ 編輯活動媒體需求' : '➕ 新增活動媒體需求'}
                   </h3>
                   <button onClick={() => setIsModalOpen(false)} className="text-slate-400 hover:text-slate-600 font-bold text-xl px-2">
                     ✕
@@ -1070,7 +1163,7 @@
                     <label className="block text-xs font-semibold text-slate-700 mb-1">備註說明 / 宣傳重點</label>
                     <textarea
                       rows="2"
-                      placeholder="例如：此活動廣宣主要投放科技專業媒體..."
+                      placeholder="例如：此活動廣宣主要投放科技相關媒體"
                       value={formData.notes}
                       onChange={(e) => setFormData({ ...formData, notes: e.target.value })}
                       className="w-full text-sm p-2.5 bg-slate-50 border border-slate-300 rounded-lg focus:ring-blue-500"
@@ -1156,7 +1249,6 @@
                     </div>
                   </div>
 
-                  {/* 動態媒體下拉選單：讀取 dynamicMediaList（含預設、歷史展覽媒體與 KPI 自訂媒體） */}
                   <datalist id="media-presets">
                     {dynamicMediaList.map(m => (<option key={m} value={m} />))}
                   </datalist>
