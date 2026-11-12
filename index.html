@@ -24,8 +24,8 @@
   <script type="text/babel">
     const { useState, useEffect, useMemo } = React;
 
-    // ⚠️ 請保留您原本正常運作的 GAS 網址
-    const GAS_WEB_APP_URL = "https://script.google.com/macros/s/AKfycbzFYzNAij9SbKi83N3lQS5k__dVulfSzjZtoVeqFy7c1P-Gf-7U0F8KecSiw6FDGNtV/exec";
+    // 🔒 安全性設計：程式碼內不寫死任何 API 網址，改由使用者開啟網頁後動態輸入並存於個人瀏覽器本機
+    const STORAGE_API_KEY = 'taitra_pr_gas_api_url';
 
     const PRESET_MEDIA_LIST = [
       "工商時報", "經濟日報", "商業周刊", 
@@ -35,6 +35,15 @@
     const PRESET_YEARS = ["2026", "2027", "2028", "2029"];
 
     function App() {
+      // 💡 API 網址狀態 (優先讀取使用者瀏覽器本機記憶，無則為空字串)
+      const [gasUrl, setGasUrl] = useState(() => {
+        return localStorage.getItem(STORAGE_API_KEY) || '';
+      });
+      const [apiUrlInput, setApiUrlInput] = useState(() => {
+        return localStorage.getItem(STORAGE_API_KEY) || '';
+      });
+      const [isApiModalOpen, setIsApiModalOpen] = useState(false);
+
       const [exhibitions, setExhibitions] = useState([]);
       const [mediaKpis, setMediaKpis] = useState([]);
 
@@ -172,7 +181,7 @@
 
       const [isLoading, setIsLoading] = useState(false);
       const [isSaving, setIsSaving] = useState(false);
-      const [syncStatus, setSyncStatus] = useState('已連線至雲端資料庫');
+      const [syncStatus, setSyncStatus] = useState('尚未連線（請輸入 API 網址以載入資料）');
 
       const [isModalOpen, setIsModalOpen] = useState(false);
       const [editingExhibition, setEditingExhibition] = useState(null);
@@ -242,36 +251,47 @@
         }
       }, [availableYears]);
 
-      const fetchCloudData = async () => {
-        if (!GAS_WEB_APP_URL || GAS_WEB_APP_URL.includes('YOUR_SCRIPT_ID_HERE')) {
-          setSyncStatus('尚未設定 GAS URL (目前使用單機模式)');
+      // 連線並讀取 Google Sheet 雲端資料
+      const fetchCloudData = async (targetUrl = gasUrl) => {
+        const cleanUrl = (targetUrl || '').trim();
+        if (!cleanUrl) {
+          setSyncStatus('尚未連線（請輸入 API 網址以載入資料）');
           return;
         }
+        if (!cleanUrl.startsWith('https://script.google.com/')) {
+          alert('請輸入正確的 Google Apps Script 網頁應用程式網址（以 https://script.google.com/ 開頭）');
+          return;
+        }
+
         setIsLoading(true);
-        setSyncStatus('正在同步雲端資料...');
+        setSyncStatus('正在連線並同步雲端資料...');
         try {
-          const res = await fetch(GAS_WEB_APP_URL);
+          const res = await fetch(cleanUrl);
           const data = await res.json();
           if (Array.isArray(data)) {
             setExhibitions(data);
+            setMediaKpis([]);
           } else if (data && typeof data === 'object') {
-            if (Array.isArray(data.exhibitions)) {
-              setExhibitions(data.exhibitions);
-            }
-            if (Array.isArray(data.mediaKpis)) {
-              setMediaKpis(data.mediaKpis);
-            }
+            setExhibitions(Array.isArray(data.exhibitions) ? data.exhibitions : []);
+            setMediaKpis(Array.isArray(data.mediaKpis) ? data.mediaKpis : []);
           }
           setSyncStatus('雲端資料已是最新狀態');
         } catch (err) {
           console.error('Fetch error:', err);
-          setSyncStatus('雲端連線失敗，請檢查網路或 GAS URL 設定');
+          setSyncStatus('雲端連線失敗，請檢查 API 網址是否正確或權限是否已開啟');
         } finally {
           setIsLoading(false);
         }
       };
 
+      // 儲存資料至 Google Sheet 雲端資料庫
       const saveCloudData = async (newExhibitions, newKpis = mediaKpis) => {
+        const cleanUrl = (gasUrl || '').trim();
+        if (!cleanUrl) {
+          alert('尚未設定 API 網址，請先貼上 GAS 網址並連線後再進行編輯！');
+          return;
+        }
+
         setExhibitions(newExhibitions);
         setMediaKpis(newKpis);
 
@@ -280,16 +300,10 @@
           mediaKpis: newKpis
         };
 
-        if (!GAS_WEB_APP_URL || GAS_WEB_APP_URL.includes('YOUR_SCRIPT_ID_HERE')) {
-          localStorage.setItem('taitra_media_procurement_data', JSON.stringify(newExhibitions));
-          localStorage.setItem('taitra_media_kpi_data', JSON.stringify(newKpis));
-          return;
-        }
-
         setIsSaving(true);
         setSyncStatus('正在寫入 Google Sheet 雲端資料庫...');
         try {
-          await fetch(GAS_WEB_APP_URL, {
+          await fetch(cleanUrl, {
             method: 'POST',
             mode: 'no-cors',
             headers: { 'Content-Type': 'application/json' },
@@ -304,8 +318,42 @@
         }
       };
 
+      // 儲存並套用 API 網址
+      const handleConnectApi = (e) => {
+        e.preventDefault();
+        const trimmed = apiUrlInput.trim();
+        if (!trimmed) {
+          alert('請貼上 GAS Web App API 網址');
+          return;
+        }
+        if (!trimmed.startsWith('https://script.google.com/')) {
+          alert('網址格式不正確，請確認是否為 Google Apps Script 產生的網頁應用程式網址（https://script.google.com/...）');
+          return;
+        }
+        localStorage.setItem(STORAGE_API_KEY, trimmed);
+        setGasUrl(trimmed);
+        setIsApiModalOpen(false);
+        fetchCloudData(trimmed);
+      };
+
+      // 清除 API 網址並中斷連線（清空畫面資料）
+      const handleDisconnectApi = () => {
+        if (confirm('確定要清除本機記憶的 API 網址並中斷連線嗎？\n（中斷後畫面資料將立即清空，不影響 Google Sheet 雲端原檔）')) {
+          localStorage.removeItem(STORAGE_API_KEY);
+          setGasUrl('');
+          setApiUrlInput('');
+          setExhibitions([]);
+          setMediaKpis([]);
+          setSelectedMediaNames([]);
+          setIsApiModalOpen(false);
+          setSyncStatus('已中斷連線並清除本機 API 金鑰');
+        }
+      };
+
       useEffect(() => {
-        fetchCloudData();
+        if (gasUrl) {
+          fetchCloudData(gasUrl);
+        }
       }, []);
 
       // 「資料匯入」分頁當前檢視年份的展覽清單
@@ -451,6 +499,10 @@
 
       // 開啟新增或編輯 KPI 彈跳視窗
       const handleOpenKpiModal = (kpi = null) => {
+        if (!gasUrl) {
+          alert('請先貼上 API 網址連線至 Google Sheet 資料庫！');
+          return;
+        }
         if (kpi) {
           setEditingKpi(kpi);
           setKpiForm({
@@ -500,6 +552,10 @@
       };
 
       const handleOpenModal = (ex = null) => {
+        if (!gasUrl) {
+          alert('請先貼上 API 網址連線至 Google Sheet 資料庫！');
+          return;
+        }
         if (ex) {
           setEditingExhibition(ex);
           setFormData({
@@ -653,7 +709,6 @@
       }, [dashboardExhibitions]);
 
       // 💡 跨年度比較 (YoY) 數據計算
-      // 1. 年度全活動總媒體預算量比較
       const yearlySummaryComparison = useMemo(() => {
         return availableYears.map((yr, idx) => {
           const yearExs = exhibitions.filter(ex => String(ex.year || '2027').trim() === yr);
@@ -670,7 +725,6 @@
             });
           });
 
-          // 計算與前一年度相比的成長率
           let yoyPRChange = null;
           if (idx > 0) {
             const prevYr = availableYears[idx - 1];
@@ -696,7 +750,6 @@
         });
       }, [exhibitions, availableYears]);
 
-      // 2. 單一特定活動年度預算量比較 (自動去掉名稱中的 4 碼年份作為系列基準鍵，例如 "COMPUTEX 2026" 與 "COMPUTEX 2027" 會自動歸為同一系列)
       const normalizeActivityName = (name) => {
         if (!name) return '';
         return name.replace(/20\d{2}/g, '').replace(/\s+/g, ' ').trim();
@@ -713,7 +766,6 @@
             };
           }
           const yr = String(ex.year || '2027').trim();
-          // 若同一年有同名活動則累加
           if (!seriesMap[baseName].recordsByYear[yr]) {
             seriesMap[baseName].recordsByYear[yr] = {
               year: yr,
@@ -745,7 +797,6 @@
         return Object.values(seriesMap).sort((a, b) => a.baseName.localeCompare(b.baseName, 'zh-TW'));
       }, [exhibitions]);
 
-      // 預設選取第一個可比較的活動系列
       useEffect(() => {
         if (uniqueActivitySeries.length > 0) {
           const exists = uniqueActivitySeries.some(s => s.baseName === compareActivityKey);
@@ -759,7 +810,6 @@
         return uniqueActivitySeries.find(s => s.baseName === compareActivityKey) || null;
       }, [uniqueActivitySeries, compareActivityKey]);
 
-      // 3. 媒體被投放歷年預算量比較矩陣
       const mediaYearlyComparisonMatrix = useMemo(() => {
         const mediaNamesSet = new Set();
         exhibitions.forEach(ex => {
@@ -838,9 +888,15 @@
                   <h1 className="text-lg font-bold leading-tight">外貿協會公關組</h1>
                   <div className="flex items-center space-x-2 text-xs text-slate-400">
                     <span>媒體採購與預算整合管理系統</span>
-                    <span className="bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 px-1.5 py-0.5 rounded text-[10px]">
-                      ☁️ Google Sheet 共編中
-                    </span>
+                    {gasUrl ? (
+                      <span className="bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 px-1.5 py-0.5 rounded text-[10px]">
+                        ☁️ Google Sheet 已連線
+                      </span>
+                    ) : (
+                      <span className="bg-amber-500/20 text-amber-300 border border-amber-500/30 px-1.5 py-0.5 rounded text-[10px]">
+                        🔒 未連線（請輸入 API 網址）
+                      </span>
+                    )}
                   </div>
                 </div>
               </div>
@@ -884,24 +940,44 @@
               {/* Actions & Status */}
               <div className="flex items-center space-x-2">
                 <button
-                  onClick={() => fetchCloudData()}
-                  title="重新從 Google Sheet 抓取最新共編資料"
-                  className="bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 px-2.5 py-1.5 rounded-lg text-xs font-medium flex items-center space-x-1"
+                  onClick={() => {
+                    setApiUrlInput(gasUrl);
+                    setIsApiModalOpen(true);
+                  }}
+                  title="設定或中斷 Google Sheet API 連線網址"
+                  className={`px-2.5 py-1.5 rounded-lg text-xs font-medium flex items-center space-x-1 border transition-all ${
+                    gasUrl
+                      ? 'bg-slate-800 hover:bg-slate-700 text-emerald-300 border-emerald-700/60'
+                      : 'bg-amber-600 hover:bg-amber-500 text-white border-amber-500 shadow animate-pulse'
+                  }`}
                 >
-                  <span>🔄</span>
-                  <span>{isLoading ? '同步中...' : '重新整理'}</span>
+                  <span>🔗</span>
+                  <span>{gasUrl ? 'API 設定' : '貼上 API 連線'}</span>
                 </button>
 
-                <button
-                  onClick={() => handleOpenModal()}
-                  className="bg-emerald-600 hover:bg-emerald-500 text-white px-3 py-1.5 rounded-lg text-xs font-medium flex items-center shadow transition-all"
-                >
-                  <span className="mr-1 text-base font-bold">+</span> 新增活動
-                </button>
+                {gasUrl && (
+                  <>
+                    <button
+                      onClick={() => fetchCloudData()}
+                      title="重新從 Google Sheet 抓取最新共編資料"
+                      className="bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 px-2.5 py-1.5 rounded-lg text-xs font-medium flex items-center space-x-1"
+                    >
+                      <span>🔄</span>
+                      <span>{isLoading ? '同步中...' : '重新整理'}</span>
+                    </button>
 
-                <button onClick={handleExportCSV} title="匯出 CSV 報表" className="bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 px-2.5 py-1.5 rounded-lg text-xs font-medium">
-                  匯出
-                </button>
+                    <button
+                      onClick={() => handleOpenModal()}
+                      className="bg-emerald-600 hover:bg-emerald-500 text-white px-3 py-1.5 rounded-lg text-xs font-medium flex items-center shadow transition-all"
+                    >
+                      <span className="mr-1 text-base font-bold">+</span> 新增活動
+                    </button>
+
+                    <button onClick={handleExportCSV} title="匯出 CSV 報表" className="bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 px-2.5 py-1.5 rounded-lg text-xs font-medium">
+                      匯出
+                    </button>
+                  </>
+                )}
               </div>
             </div>
 
@@ -915,7 +991,50 @@
           {/* Main Content */}
           <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6">
 
-            {exhibitions.length === 0 && !isLoading && (
+            {/* 🔒 尚未輸入 API 網址時的安全性引導畫面 */}
+            {!gasUrl && (
+              <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-8 sm:p-12 max-w-xl mx-auto my-8">
+                <div className="w-14 h-14 bg-amber-50 text-amber-600 border border-amber-200 rounded-2xl flex items-center justify-center mx-auto mb-4 text-2xl">
+                  🔐
+                </div>
+                <h2 className="text-xl font-bold text-slate-800 text-center mb-2">
+                  請輸入 Google Sheet API 連線網址
+                </h2>
+                <p className="text-slate-500 text-xs text-center leading-relaxed mb-6">
+                  為確保單位資料安全，本系統不在程式碼中存放任何資料庫網址。<br />
+                  請貼上公關組專用的 Google Apps Script 網頁應用程式網址以載入資料。
+                </p>
+
+                <form onSubmit={handleConnectApi} className="space-y-4">
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-700 mb-1.5">
+                      GAS Web App API 網址
+                    </label>
+                    <input
+                      type="password"
+                      required
+                      placeholder="https://script.google.com/macros/s/..."
+                      value={apiUrlInput}
+                      onChange={(e) => setApiUrlInput(e.target.value)}
+                      className="w-full text-sm p-3 bg-slate-50 border border-slate-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                    />
+                    <span className="text-[11px] text-slate-400 block mt-1.5">
+                      💡 網址僅會儲存在您目前使用的電腦瀏覽器本機中，不會上傳至公開網路；若使用公用電腦，離開前可點擊右上角「API 設定 → 中斷連線」清除。
+                    </span>
+                  </div>
+
+                  <button
+                    type="submit"
+                    className="w-full bg-blue-600 hover:bg-blue-700 text-white py-3 rounded-xl font-bold text-sm shadow transition-all"
+                  >
+                    連線至 Google Sheet 資料庫
+                  </button>
+                </form>
+              </div>
+            )}
+
+            {/* 已輸入 API 網址但目前資料庫為空 */}
+            {gasUrl && exhibitions.length === 0 && !isLoading && (
               <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-12 text-center my-8">
                 <div className="w-16 h-16 bg-blue-50 text-blue-600 rounded-full flex items-center justify-center mx-auto mb-4 font-bold text-2xl">
                   📋
@@ -930,7 +1049,7 @@
               </div>
             )}
 
-            {exhibitions.length > 0 && (
+            {gasUrl && exhibitions.length > 0 && (
               <>
                 {/* 1. 資料匯入 (預算分配管理頁面) */}
                 {activeTab === 'exhibitions' && (
@@ -1613,7 +1732,6 @@
                                 <td className="px-4 py-3 font-bold text-slate-800">{row.mediaName}</td>
                                 {availableYears.map((yr, idx) => {
                                   const cell = row.byYear[yr] || { prSum: 0, exCount: 0 };
-                                  // 計算與前一年度相比的差額
                                   let diffBadge = null;
                                   if (idx > 0) {
                                     const prevCell = row.byYear[availableYears[idx - 1]] || { prSum: 0 };
@@ -1762,6 +1880,68 @@
               </>
             )}
           </main>
+
+          {/* 🔗 API 連線設定 / 登出清除視窗 Modal */}
+          {isApiModalOpen && (
+            <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4">
+              <div className="bg-white rounded-2xl shadow-xl max-w-lg w-full overflow-hidden">
+                <div className="p-5 bg-slate-50 border-b flex justify-between items-center">
+                  <h3 className="font-bold text-slate-800 text-base flex items-center">
+                    <span className="mr-2">🔗</span> Google Sheet API 連線設定
+                  </h3>
+                  <button type="button" onClick={() => setIsApiModalOpen(false)} className="text-slate-400 font-bold text-xl px-2">✕</button>
+                </div>
+                <form onSubmit={handleConnectApi} className="p-6 space-y-4">
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-700 mb-1">
+                      GAS Web App API 網址 *
+                    </label>
+                    <input
+                      type="password"
+                      required
+                      placeholder="https://script.google.com/macros/s/..."
+                      value={apiUrlInput}
+                      onChange={(e) => setApiUrlInput(e.target.value)}
+                      className="w-full text-sm p-2.5 bg-slate-50 border border-slate-300 rounded-lg focus:ring-blue-500"
+                    />
+                    <p className="text-[11px] text-slate-400 mt-1.5 leading-relaxed">
+                      系統採用本機記憶機制，網址僅儲存在您這台電腦的瀏覽器中，不會暴露在網頁原始碼內。
+                    </p>
+                  </div>
+
+                  <div className="pt-2 flex flex-wrap justify-between items-center gap-2 border-t border-slate-100">
+                    {gasUrl ? (
+                      <button
+                        type="button"
+                        onClick={handleDisconnectApi}
+                        className="px-3 py-2 text-xs bg-rose-50 hover:bg-rose-100 text-rose-600 border border-rose-200 rounded-lg font-semibold"
+                      >
+                        🗑️ 清除網址並中斷連線
+                      </button>
+                    ) : (
+                      <span></span>
+                    )}
+
+                    <div className="flex items-center space-x-2">
+                      <button
+                        type="button"
+                        onClick={() => setIsApiModalOpen(false)}
+                        className="px-4 py-2 text-xs text-slate-600 hover:bg-slate-100 rounded-lg"
+                      >
+                        取消
+                      </button>
+                      <button
+                        type="submit"
+                        className="px-4 py-2 text-xs bg-blue-600 hover:bg-blue-700 text-white rounded-lg shadow font-medium"
+                      >
+                        儲存並連線
+                      </button>
+                    </div>
+                  </div>
+                </form>
+              </div>
+            </div>
+          )}
 
           {/* 新增 / 編輯 KPI 彈跳視窗 Modal */}
           {isKpiModalOpen && (
