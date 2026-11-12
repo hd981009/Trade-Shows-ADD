@@ -29,7 +29,7 @@
 
     const PRESET_MEDIA_LIST = [
       "工商時報", "經濟日報", "商業周刊", 
-      "自由時報", "聯合報", "中國時報"
+      "自由時報", "聯合報/聯合新聞網", "中國時報", "中時新聞網/時報資訊"
     ];
 
     const PRESET_YEARS = ["2026", "2027", "2028", "2029"];
@@ -60,7 +60,7 @@
       // 💡 「總體數據儀表板」檢視年份 ('ALL' 或特定年份)
       const [dashboardSelectedYear, setDashboardSelectedYear] = useState('2027');
 
-      // 💡 「跨年度比較」分頁選取的單一特定活動名稱
+      // 💡 「跨年度比較」分頁選取的單一特定活動名稱 (以小寫 key 儲存以支援大小寫通用)
       const [compareActivityKey, setCompareActivityKey] = useState('');
 
       // 💡 媒體甘特圖展開狀態
@@ -217,6 +217,32 @@
         });
         return Array.from(mediaSet);
       }, [exhibitions, mediaKpis]);
+
+      // 💡 動態歷史活動名稱清單 (大小寫通用去重，保留首次出現的顯示名稱，同時瀏覽器 datalist 支援大小寫模糊搜尋)
+      const dynamicExhibitionNames = useMemo(() => {
+        const nameMap = new Map();
+        exhibitions.forEach(ex => {
+          if (ex.name && ex.name.trim() !== '') {
+            const cleanName = ex.name.trim();
+            const lowerKey = cleanName.toLowerCase();
+            if (!nameMap.has(lowerKey)) {
+              nameMap.set(lowerKey, cleanName);
+            }
+          }
+        });
+        return Array.from(nameMap.values()).sort((a, b) => a.localeCompare(b, 'zh-TW'));
+      }, [exhibitions]);
+
+      // 💡 動態歷史承辦單位清單 (自動擷取曾經輸入過的承辦單位)
+      const dynamicDepartments = useMemo(() => {
+        const deptSet = new Set();
+        exhibitions.forEach(ex => {
+          if (ex.department && ex.department.trim() !== '' && ex.department.trim() !== '未指定') {
+            deptSet.add(ex.department.trim());
+          }
+        });
+        return Array.from(deptSet).sort((a, b) => a.localeCompare(b, 'zh-TW'));
+      }, [exhibitions]);
 
       // 取得所有出現過的年份清單 (由小到大排序：年份越小的越前面)
       const availableYears = useMemo(() => {
@@ -617,17 +643,23 @@
 
       const handleSaveExhibition = (e) => {
         e.preventDefault();
-        if (!formData.name) {
+        if (!formData.name || !formData.name.trim()) {
           alert('請輸入活動名稱');
           return;
         }
 
         const cleanYear = String(formData.year || '2027').trim();
+        const trimmedName = formData.name.trim();
+        // 💡 大小寫通用：若輸入的活動名稱與既有紀錄僅大小寫不同（例如 computex 與 COMPUTEX），自動沿用既有標準名稱
+        const matchedExistingName = dynamicExhibitionNames.find(
+          existing => existing.toLowerCase() === trimmedName.toLowerCase()
+        );
+        const finalName = matchedExistingName || trimmedName;
 
         const newExhibition = {
           id: editingExhibition ? editingExhibition.id : 'EX-' + Date.now(),
-          name: formData.name,
-          department: formData.department || '未指定',
+          name: finalName,
+          department: (formData.department || '').trim() || '未指定',
           totalBudget: Number(formData.totalBudget) || 0,
           year: cleanYear,
           notes: formData.notes || '',
@@ -755,19 +787,22 @@
         return name.replace(/20\d{2}/g, '').replace(/\s+/g, ' ').trim();
       };
 
+      // 💡 單一活動跨年度 series 整理（大小寫通用合併，例如 COMPUTEX / Computex / computex）
       const uniqueActivitySeries = useMemo(() => {
         const seriesMap = {};
         exhibitions.forEach(ex => {
-          const baseName = normalizeActivityName(ex.name) || ex.name.trim();
-          if (!seriesMap[baseName]) {
-            seriesMap[baseName] = {
-              baseName,
+          const displayBaseName = normalizeActivityName(ex.name) || ex.name.trim();
+          const seriesKey = displayBaseName.toLowerCase();
+          if (!seriesMap[seriesKey]) {
+            seriesMap[seriesKey] = {
+              seriesKey,
+              baseName: displayBaseName,
               recordsByYear: {}
             };
           }
           const yr = String(ex.year || '2027').trim();
-          if (!seriesMap[baseName].recordsByYear[yr]) {
-            seriesMap[baseName].recordsByYear[yr] = {
+          if (!seriesMap[seriesKey].recordsByYear[yr]) {
+            seriesMap[seriesKey].recordsByYear[yr] = {
               year: yr,
               originalNames: [ex.name],
               department: ex.department,
@@ -777,11 +812,13 @@
               mediaBreakdown: {}
             };
           } else {
-            seriesMap[baseName].recordsByYear[yr].originalNames.push(ex.name);
-            seriesMap[baseName].recordsByYear[yr].totalBudget += Number(ex.totalBudget) || 0;
+            if (!seriesMap[seriesKey].recordsByYear[yr].originalNames.includes(ex.name)) {
+              seriesMap[seriesKey].recordsByYear[yr].originalNames.push(ex.name);
+            }
+            seriesMap[seriesKey].recordsByYear[yr].totalBudget += Number(ex.totalBudget) || 0;
           }
 
-          const targetRec = seriesMap[baseName].recordsByYear[yr];
+          const targetRec = seriesMap[seriesKey].recordsByYear[yr];
           (ex.mediaItems || []).forEach(item => {
             const mName = item.name ? item.name.trim() : '';
             const exB = Number(item.exBudget) || 0;
@@ -799,15 +836,15 @@
 
       useEffect(() => {
         if (uniqueActivitySeries.length > 0) {
-          const exists = uniqueActivitySeries.some(s => s.baseName === compareActivityKey);
+          const exists = uniqueActivitySeries.some(s => s.seriesKey === compareActivityKey);
           if (!exists) {
-            setCompareActivityKey(uniqueActivitySeries[0].baseName);
+            setCompareActivityKey(uniqueActivitySeries[0].seriesKey);
           }
         }
       }, [uniqueActivitySeries]);
 
       const selectedSeriesDetail = useMemo(() => {
-        return uniqueActivitySeries.find(s => s.baseName === compareActivityKey) || null;
+        return uniqueActivitySeries.find(s => s.seriesKey === compareActivityKey) || null;
       }, [uniqueActivitySeries, compareActivityKey]);
 
       const mediaYearlyComparisonMatrix = useMemo(() => {
@@ -966,13 +1003,6 @@
                       <span>{isLoading ? '同步中...' : '重新整理'}</span>
                     </button>
 
-                    <button
-                      onClick={() => handleOpenModal()}
-                      className="bg-emerald-600 hover:bg-emerald-500 text-white px-3 py-1.5 rounded-lg text-xs font-medium flex items-center shadow transition-all"
-                    >
-                      <span className="mr-1 text-base font-bold">+</span> 新增活動
-                    </button>
-
                     <button onClick={handleExportCSV} title="匯出 CSV 報表" className="bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 px-2.5 py-1.5 rounded-lg text-xs font-medium">
                       匯出
                     </button>
@@ -1041,9 +1071,9 @@
                 </div>
                 <h3 className="text-xl font-bold text-slate-800 mb-2">目前尚無活動媒體需求資料</h3>
                 <p className="text-slate-500 text-sm max-w-md mx-auto mb-6">
-                  點擊右上角「新增活動」，所有輸入的資料都會自動即時同步給全組同仁！
+                  點擊下方「新增活動」，所有輸入的資料都會自動即時同步給全組同仁！
                 </p>
-                <button onClick={() => handleOpenModal()} className="bg-blue-600 hover:bg-blue-700 text-white px-5 py-2 rounded-lg font-medium text-sm shadow">
+                <button onClick={() => handleOpenModal()} className="bg-emerald-600 hover:bg-emerald-500 text-white px-5 py-2.5 rounded-lg font-medium text-sm shadow">
                   + 開始新增第一個活動廣宣需求
                 </button>
               </div>
@@ -1241,9 +1271,18 @@
                           </div>
                         </div>
 
-                        <span className="text-xs text-slate-400">
-                          💡 按住左側「⋮⋮」可上下拖曳排序；點擊「▶」展開活動明細
-                        </span>
+                        <div className="flex items-center space-x-3">
+                          <span className="text-xs text-slate-400 hidden sm:inline">
+                            💡 按住左側「⋮⋮」可上下拖曳排序；點擊「▶」展開活動明細
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => handleOpenModal()}
+                            className="bg-emerald-600 hover:bg-emerald-500 text-white px-3.5 py-1.5 rounded-lg text-xs font-medium flex items-center shadow-sm transition-all"
+                          >
+                            <span className="mr-1 text-sm font-bold">+</span> 新增活動
+                          </button>
+                        </div>
                       </div>
 
                       {filteredYearExhibitions.length > 0 ? (
@@ -1574,25 +1613,25 @@
                         <table className="w-full text-sm text-left text-slate-600 border border-slate-200 rounded-lg overflow-hidden">
                           <thead className="text-xs uppercase bg-slate-100 text-slate-700 border-b border-slate-200">
                             <tr>
-                              <th className="px-4 py-3">年度</th>
-                              <th className="px-4 py-3 text-center">登錄活動數</th>
-                              <th className="px-4 py-3 text-center">合作媒體數</th>
-                              <th className="px-4 py-3 text-right">預算總額上限</th>
-                              <th className="px-4 py-3 text-right">展覽處原預算加總</th>
-                              <th className="px-4 py-3 text-right">公關組建議分配總額</th>
-                              <th className="px-4 py-3 text-right">公關分配 YoY 變化</th>
+                              <th className="px-4 py-3 whitespace-nowrap">年度</th>
+                              <th className="px-4 py-3 text-center whitespace-nowrap">登錄活動數</th>
+                              <th className="px-4 py-3 text-center whitespace-nowrap">合作媒體數</th>
+                              <th className="px-4 py-3 text-right whitespace-nowrap">預算總額上限</th>
+                              <th className="px-4 py-3 text-right whitespace-nowrap">展覽處原預算加總</th>
+                              <th className="px-4 py-3 text-right whitespace-nowrap">公關組建議分配總額</th>
+                              <th className="px-4 py-3 text-right whitespace-nowrap">公關分配 YoY 變化</th>
                             </tr>
                           </thead>
                           <tbody className="divide-y divide-slate-200">
                             {yearlySummaryComparison.map(row => (
                               <tr key={row.year} className="hover:bg-slate-50">
-                                <td className="px-4 py-3 font-bold text-indigo-700">{row.year} 年</td>
-                                <td className="px-4 py-3 text-center font-medium">{row.exhibitionsCount} 展</td>
-                                <td className="px-4 py-3 text-center font-medium">{row.mediaCount} 家</td>
-                                <td className="px-4 py-3 text-right text-slate-700 font-semibold">NT$ {row.totalLimit.toLocaleString()}</td>
-                                <td className="px-4 py-3 text-right text-slate-500">NT$ {row.totalEx.toLocaleString()}</td>
-                                <td className="px-4 py-3 text-right font-extrabold text-blue-600">NT$ {row.totalPR.toLocaleString()}</td>
-                                <td className="px-4 py-3 text-right text-xs font-bold">
+                                <td className="px-4 py-3 font-bold text-indigo-700 whitespace-nowrap">{row.year} 年</td>
+                                <td className="px-4 py-3 text-center font-medium whitespace-nowrap">{row.exhibitionsCount} 展</td>
+                                <td className="px-4 py-3 text-center font-medium whitespace-nowrap">{row.mediaCount} 家</td>
+                                <td className="px-4 py-3 text-right text-slate-700 font-semibold whitespace-nowrap">NT$ {row.totalLimit.toLocaleString()}</td>
+                                <td className="px-4 py-3 text-right text-slate-500 whitespace-nowrap">NT$ {row.totalEx.toLocaleString()}</td>
+                                <td className="px-4 py-3 text-right font-extrabold text-blue-600 whitespace-nowrap">NT$ {row.totalPR.toLocaleString()}</td>
+                                <td className="px-4 py-3 text-right text-xs font-bold whitespace-nowrap">
                                   {row.yoyPRChange === null ? (
                                     <span className="text-slate-400">基準年</span>
                                   ) : row.yoyPRChange > 0 ? (
@@ -1618,7 +1657,7 @@
                             <span className="mr-2">🎯</span> 2. 單一特定活動年度預算量比較
                           </h3>
                           <p className="text-xs text-slate-500 mt-1">
-                            選擇特定活動（系統會自動將不同年份的同名/同系列活動對齊比較），檢視各年度預算規模與媒體組合變化。
+                            選擇特定活動（系統會自動將不同年份的同名/同系列活動對齊比較，大小寫通用），檢視各年度預算規模與媒體組合變化。
                           </p>
                         </div>
 
@@ -1630,7 +1669,7 @@
                             className="text-sm font-bold text-slate-800 bg-slate-50 border border-slate-300 rounded-lg px-3 py-1.5 focus:ring-blue-500"
                           >
                             {uniqueActivitySeries.map(series => (
-                              <option key={series.baseName} value={series.baseName}>
+                              <option key={series.seriesKey} value={series.seriesKey}>
                                 {series.baseName}
                               </option>
                             ))}
@@ -1704,32 +1743,39 @@
                       )}
                     </div>
 
-                    {/* 區塊三：媒體被投放歷年預算量比較 */}
+                    {/* 區塊三：媒體被投放歷年預算量比較（首欄凍結 + 支援多年份橫向滑動） */}
                     <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200 space-y-4">
-                      <div>
+                      <div className="flex flex-wrap justify-between items-center gap-2">
                         <h3 className="font-bold text-slate-800 text-base flex items-center">
                           <span className="mr-2">📰</span> 3. 媒體被投放歷年預算量比較 (依公關組建議分配金額)
                         </h3>
-                        <p className="text-xs text-slate-500 mt-1">
-                          橫向比較每家媒體在各年度獲得的總投放金額與參與展覽數，協助評估年度採購集中度與議價籌碼。
-                        </p>
+                        {availableYears.length > 4 && (
+                          <span className="text-[11px] text-slate-400">
+                            ↔️ 年份較多時可左右滑動檢視（左側媒體名稱已自動固定）
+                          </span>
+                        )}
                       </div>
 
-                      <div className="overflow-x-auto">
-                        <table className="w-full text-sm text-left text-slate-600 border border-slate-200 rounded-lg overflow-hidden">
+                      <div className="overflow-x-auto border border-slate-200 rounded-lg">
+                        <table className="w-full text-sm text-left text-slate-600">
                           <thead className="text-xs uppercase bg-slate-100 text-slate-700 border-b border-slate-200">
                             <tr>
-                              <th className="px-4 py-3">媒體名稱</th>
+                              <th className="px-4 py-3 sticky left-0 z-10 bg-slate-100 border-r border-slate-200 whitespace-nowrap">
+                                媒體名稱
+                              </th>
                               {availableYears.map(yr => (
-                                <th key={yr} className="px-4 py-3 text-right">{yr} 年度投放額</th>
+                                <th key={yr} className="px-4 py-3 text-right whitespace-nowrap min-w-[140px]">
+                                  {yr} 年度投放額
+                                </th>
                               ))}
-                              <th className="px-4 py-3 text-right bg-slate-200/60">歷年累計總額</th>
                             </tr>
                           </thead>
                           <tbody className="divide-y divide-slate-200">
                             {mediaYearlyComparisonMatrix.map(row => (
-                              <tr key={row.mediaName} className="hover:bg-slate-50">
-                                <td className="px-4 py-3 font-bold text-slate-800">{row.mediaName}</td>
+                              <tr key={row.mediaName} className="group hover:bg-slate-50">
+                                <td className="px-4 py-3 font-bold text-slate-800 sticky left-0 z-10 bg-white group-hover:bg-slate-50 border-r border-slate-200 whitespace-nowrap">
+                                  {row.mediaName}
+                                </td>
                                 {availableYears.map((yr, idx) => {
                                   const cell = row.byYear[yr] || { prSum: 0, exCount: 0 };
                                   let diffBadge = null;
@@ -1746,7 +1792,7 @@
                                   }
 
                                   return (
-                                    <td key={yr} className="px-4 py-3 text-right">
+                                    <td key={yr} className="px-4 py-3 text-right whitespace-nowrap">
                                       {cell.prSum > 0 ? (
                                         <div>
                                           <span className="font-bold text-blue-600">NT$ {cell.prSum.toLocaleString()}</span>
@@ -1759,9 +1805,6 @@
                                     </td>
                                   );
                                 })}
-                                <td className="px-4 py-3 text-right font-extrabold text-slate-900 bg-slate-50">
-                                  NT$ {row.grandTotalPR.toLocaleString()}
-                                </td>
                               </tr>
                             ))}
                           </tbody>
@@ -2022,13 +2065,28 @@
                     </div>
 
                     <div className="sm:col-span-1">
-                      <label className="block text-xs font-semibold text-slate-700 mb-1">活動名稱 *</label>
-                      <input type="text" required placeholder="COMPUTEX" value={formData.name} onChange={(e) => setFormData({ ...formData, name: e.target.value })} className="w-full text-sm p-2.5 bg-slate-50 border rounded-lg" />
+                      <label className="block text-xs font-semibold text-slate-700 mb-1">活動名稱 * (大小寫通用)</label>
+                      <input
+                        type="text"
+                        list="exhibition-name-presets"
+                        required
+                        placeholder="COMPUTEX"
+                        value={formData.name}
+                        onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                        className="w-full text-sm p-2.5 bg-slate-50 border rounded-lg focus:ring-blue-500"
+                      />
                     </div>
 
                     <div className="sm:col-span-1">
-                      <label className="block text-xs font-semibold text-slate-700 mb-1">承辦單位 *</label>
-                      <input type="text" placeholder="展覽處展一組" value={formData.department} onChange={(e) => setFormData({ ...formData, department: e.target.value })} className="w-full text-sm p-2.5 bg-slate-50 border rounded-lg" />
+                      <label className="block text-xs font-semibold text-slate-700 mb-1">承辦單位 * (可選舊單位)</label>
+                      <input
+                        type="text"
+                        list="department-presets"
+                        placeholder="展覽處展一組"
+                        value={formData.department}
+                        onChange={(e) => setFormData({ ...formData, department: e.target.value })}
+                        className="w-full text-sm p-2.5 bg-slate-50 border rounded-lg focus:ring-blue-500"
+                      />
                     </div>
 
                     <div className="sm:col-span-1">
@@ -2045,7 +2103,7 @@
                   <div className="space-y-3 pt-2 border-t">
                     <div className="flex justify-between items-center">
                       <label className="text-sm font-bold text-slate-800">欲投放媒體與走期規劃</label>
-                      <button type="button" onClick={handleAddMediaRow} className="text-xs bg-blue-50 text-blue-600 border border-blue-200 px-2.5 py-1 rounded font-medium">+ 新增媒體</button>
+                      <span className="text-xs text-slate-400">共 {formData.mediaItems.length} 家媒體</span>
                     </div>
                     <div className="space-y-3">
                       {formData.mediaItems.map((item, idx) => (
@@ -2079,7 +2137,26 @@
                         </div>
                       ))}
                     </div>
+
+                    {/* 左下角：新增媒體按鈕 */}
+                    <div className="pt-1 flex justify-start">
+                      <button
+                        type="button"
+                        onClick={handleAddMediaRow}
+                        className="text-xs bg-blue-50 hover:bg-blue-100 text-blue-600 border border-blue-200 px-3 py-1.5 rounded-lg font-semibold shadow-sm transition-all flex items-center"
+                      >
+                        <span className="mr-1 font-bold">+</span> 新增媒體
+                      </button>
+                    </div>
                   </div>
+
+                  <datalist id="exhibition-name-presets">
+                    {dynamicExhibitionNames.map(name => (<option key={name} value={name} />))}
+                  </datalist>
+
+                  <datalist id="department-presets">
+                    {dynamicDepartments.map(dept => (<option key={dept} value={dept} />))}
+                  </datalist>
 
                   <datalist id="media-presets">
                     {dynamicMediaList.map(m => (<option key={m} value={m} />))}
