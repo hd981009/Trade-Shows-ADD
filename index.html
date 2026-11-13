@@ -22,12 +22,14 @@
   <div id="root"></div>
 
   <script type="text/babel">
-    const { useState, useEffect, useMemo } = React;
+    const { useState, useEffect, useMemo, useRef } = React;
 
     // 🔒 安全性設計：程式碼內不寫死任何 API 網址，改由使用者開啟網頁後動態輸入並存於個人瀏覽器本機
     const STORAGE_API_KEY = 'taitra_pr_gas_api_url';
     // 💡 本機記憶「跨年度比較 - 媒體歷年預算比較」的自訂媒體順序
     const STORAGE_COMPARE_MEDIA_ORDER_KEY = 'taitra_pr_compare_media_order';
+    // 🔄 背景靜默自動同步間隔（30 秒）
+    const AUTO_SYNC_INTERVAL_MS = 30000;
 
     const PRESET_MEDIA_LIST = [
       "工商時報", "經濟日報", "商業周刊", 
@@ -55,6 +57,23 @@
       return aEndKey.localeCompare(bEndKey);
     };
 
+    // 💡 取得目前時間 HH:MM:SS 字串
+    const formatTimeNow = () => {
+      const now = new Date();
+      return now.toTimeString().slice(0, 8);
+    };
+
+    // 💡 內容比對輔助函式（忽略 updatedAt 等中繼欄位，純粹比對資料內容是否被其他同仁修改過）
+    const stripMetaFields = (obj) => {
+      if (!obj || typeof obj !== 'object') return obj;
+      const { updatedAt, ...rest } = obj;
+      return rest;
+    };
+
+    const isSameRecordContent = (a, b) => {
+      return JSON.stringify(stripMetaFields(a)) === JSON.stringify(stripMetaFields(b));
+    };
+
     function App() {
       // 💡 API 網址狀態 (優先讀取使用者瀏覽器本機記憶，無則為空字串)
       const [gasUrl, setGasUrl] = useState(() => {
@@ -67,6 +86,15 @@
 
       const [exhibitions, setExhibitions] = useState([]);
       const [mediaKpis, setMediaKpis] = useState([]);
+
+      // 🔄 同步寫入排隊與最新狀態 Ref（確保連續操作或背景同步時不會拿到過期闭包）
+      const syncQueueRef = useRef(Promise.resolve());
+      const activeWriteCountRef = useRef(0);
+      const isFetchingRef = useRef(false);
+      const latestDataRef = useRef({ exhibitions: [], mediaKpis: [] });
+      useEffect(() => {
+        latestDataRef.current = { exhibitions, mediaKpis };
+      }, [exhibitions, mediaKpis]);
 
       // 💡 媒體年度 KPI 區塊收合狀態與檢視年份
       const [isKpiSectionExpanded, setIsKpiSectionExpanded] = useState(false);
@@ -116,6 +144,159 @@
         );
       };
 
+      // 🔄 解析 GAS 回傳格式為統一結構
+      const parseCloudPayload = (data) => {
+        if (Array.isArray(data)) {
+          return { exhibitions: data, mediaKpis: [] };
+        } else if (data && typeof data === 'object') {
+          return {
+            exhibitions: Array.isArray(data.exhibitions) ? data.exhibitions : [],
+            mediaKpis: Array.isArray(data.mediaKpis) ? data.mediaKpis : []
+          };
+        }
+        return { exhibitions: [], mediaKpis: [] };
+      };
+
+      // 🔄 智慧合併寫入引擎（方案一核心：先抓雲端最新資料 → 單筆 ID 智慧合併 → 寫回雲端）
+      // patchOp 支援類型：
+      // - { type: 'UPSERT_EXHIBITION', item, baseItem }
+      // - { type: 'DELETE_EXHIBITION', id }
+      // - { type: 'REORDER_EXHIBITIONS', orderedIds }
+      // - { type: 'UPSERT_KPI', item, baseItem }
+      // - { type: 'DELETE_KPI', id }
+      // - { type: 'REORDER_KPIS', orderedIds }
+      const enqueueSmartCloudMerge = (optimisticExhibitions, optimisticKpis, patchOp) => {
+        const cleanUrl = (gasUrl || '').trim();
+        if (!cleanUrl) {
+          alert('尚未設定 API 網址，請先貼上 GAS 網址並連線後再進行編輯！');
+          return;
+        }
+
+        // 1. 樂觀更新（Optimistic UI）：畫面立即套用，體感零延遲
+        setExhibitions(optimisticExhibitions);
+        setMediaKpis(optimisticKpis);
+
+        activeWriteCountRef.current += 1;
+        setIsSaving(true);
+        setSyncStatus('⚡ 正在背景比對雲端最新進度並智慧合併...');
+
+        // 2. 放入序列排隊，避免連續快速操作時自己跟自己撞車
+        syncQueueRef.current = syncQueueRef.current
+          .then(async () => {
+            // 步驟 A：先讀取雲端此時此刻的最新資料（包含其他同仁剛存進去的內容）
+            let remoteData = null;
+            try {
+              const res = await fetch(cleanUrl, { cache: 'no-store' });
+              const rawJson = await res.json();
+              remoteData = parseCloudPayload(rawJson);
+            } catch (fetchErr) {
+              console.warn('背景讀取雲端比對失敗，改用本機最新狀態寫入:', fetchErr);
+              remoteData = {
+                exhibitions: latestDataRef.current.exhibitions,
+                mediaKpis: latestDataRef.current.mediaKpis
+              };
+            }
+
+            let mergedExhibitions = [...remoteData.exhibitions];
+            let mergedKpis = [...remoteData.mediaKpis];
+
+            // 步驟 B：根據本次操作類型，精準合併至雲端最新資料中
+            if (patchOp) {
+              if (patchOp.type === 'UPSERT_EXHIBITION') {
+                const { item, baseItem } = patchOp;
+                const remoteIdx = mergedExhibitions.findIndex(e => e.id === item.id);
+
+                if (remoteIdx === -1) {
+                  // 若原本是新增，或雲端剛被別人刪除，直接加入
+                  mergedExhibitions.push(item);
+                } else {
+                  const remoteItem = mergedExhibitions[remoteIdx];
+                  // 若有編輯前基準，檢查雲端這筆是否剛剛被其他同仁改過
+                  if (baseItem && !isSameRecordContent(baseItem, remoteItem) && !isSameRecordContent(item, remoteItem)) {
+                    const overwrite = confirm(
+                      `⚠️ 編輯衝突提醒：\n\n活動「${item.name}」在您編輯期間，剛剛已被其他同仁更新過！\n\n` +
+                      `・按【確定】：以「您的版本」覆蓋雲端\n` +
+                      `・按【取消】：保留「其他同仁的最新版本」`
+                    );
+                    if (overwrite) {
+                      mergedExhibitions[remoteIdx] = item;
+                    }
+                  } else {
+                    mergedExhibitions[remoteIdx] = item;
+                  }
+                }
+              } else if (patchOp.type === 'DELETE_EXHIBITION') {
+                mergedExhibitions = mergedExhibitions.filter(e => e.id !== patchOp.id);
+              } else if (patchOp.type === 'REORDER_EXHIBITIONS') {
+                const orderMap = new Map(patchOp.orderedIds.map((id, idx) => [id, idx]));
+                mergedExhibitions.sort((a, b) => {
+                  const idxA = orderMap.has(a.id) ? orderMap.get(a.id) : Number.MAX_SAFE_INTEGER;
+                  const idxB = orderMap.has(b.id) ? orderMap.get(b.id) : Number.MAX_SAFE_INTEGER;
+                  return idxA - idxB;
+                });
+              } else if (patchOp.type === 'UPSERT_KPI') {
+                const { item, baseItem } = patchOp;
+                const remoteIdx = mergedKpis.findIndex(k => k.id === item.id);
+
+                if (remoteIdx === -1) {
+                  mergedKpis.push(item);
+                } else {
+                  const remoteItem = mergedKpis[remoteIdx];
+                  if (baseItem && !isSameRecordContent(baseItem, remoteItem) && !isSameRecordContent(item, remoteItem)) {
+                    const overwrite = confirm(
+                      `⚠️ 編輯衝突提醒：\n\n媒體 KPI「${item.name} (${item.year}年)」剛剛已被其他同仁更新過！\n\n` +
+                      `・按【確定】：以「您的版本」覆蓋雲端\n` +
+                      `・按【取消】：保留「其他同仁的最新版本」`
+                    );
+                    if (overwrite) {
+                      mergedKpis[remoteIdx] = item;
+                    }
+                  } else {
+                    mergedKpis[remoteIdx] = item;
+                  }
+                }
+              } else if (patchOp.type === 'DELETE_KPI') {
+                mergedKpis = mergedKpis.filter(k => k.id !== patchOp.id);
+              } else if (patchOp.type === 'REORDER_KPIS') {
+                const orderMap = new Map(patchOp.orderedIds.map((id, idx) => [id, idx]));
+                mergedKpis.sort((a, b) => {
+                  const idxA = orderMap.has(a.id) ? orderMap.get(a.id) : Number.MAX_SAFE_INTEGER;
+                  const idxB = orderMap.has(b.id) ? orderMap.get(b.id) : Number.MAX_SAFE_INTEGER;
+                  return idxA - idxB;
+                });
+              }
+            }
+
+            // 步驟 C：將合併後的完整資料寫回 Google Sheet
+            const payload = {
+              exhibitions: mergedExhibitions,
+              mediaKpis: mergedKpis
+            };
+
+            await fetch(cleanUrl, {
+              method: 'POST',
+              mode: 'no-cors',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(payload)
+            });
+
+            // 步驟 D：將合併結果（含其他同仁剛新增的資料）同步更新到本機畫面
+            setExhibitions(mergedExhibitions);
+            setMediaKpis(mergedKpis);
+            setSyncStatus(`雲端智慧合併同步成功！（${formatTimeNow()}）`);
+          })
+          .catch((err) => {
+            console.error('Smart merge save error:', err);
+            setSyncStatus('寫入失敗，請檢查網路連線後重試');
+          })
+          .finally(() => {
+            activeWriteCountRef.current = Math.max(0, activeWriteCountRef.current - 1);
+            if (activeWriteCountRef.current === 0) {
+              setIsSaving(false);
+            }
+          });
+      };
+
       // 活動拖拉排序處理
       const handleDragStart = (e, index) => {
         setDraggedIndex(index);
@@ -146,7 +327,10 @@
         setDraggedIndex(null);
         setDragOverIndex(null);
 
-        saveCloudData(updatedList, mediaKpis);
+        enqueueSmartCloudMerge(updatedList, mediaKpis, {
+          type: 'REORDER_EXHIBITIONS',
+          orderedIds: updatedList.map(item => item.id)
+        });
       };
 
       const handleDragEnd = () => {
@@ -193,7 +377,10 @@
         setDraggedKpiId(null);
         setDragOverKpiId(null);
 
-        saveCloudData(exhibitions, updatedKpis);
+        enqueueSmartCloudMerge(exhibitions, updatedKpis, {
+          type: 'REORDER_KPIS',
+          orderedIds: updatedKpis.map(k => k.id)
+        });
       };
 
       const handleKpiDragEnd = () => {
@@ -310,72 +497,88 @@
         }
       }, [availableYears]);
 
-      // 連線並讀取 Google Sheet 雲端資料
-      const fetchCloudData = async (targetUrl = gasUrl) => {
+      // 連線並讀取 Google Sheet 雲端資料（silent = true 時為背景靜默同步，不顯示轉圈遮罩）
+      const fetchCloudData = async (targetUrl = gasUrl, { silent = false } = {}) => {
         const cleanUrl = (targetUrl || '').trim();
         if (!cleanUrl) {
-          setSyncStatus('尚未連線（請輸入 API 網址以載入資料）');
+          if (!silent) setSyncStatus('尚未連線（請輸入 API 網址以載入資料）');
           return;
         }
         if (!cleanUrl.startsWith('https://script.google.com/')) {
-          alert('請輸入正確的 Google Apps Script 網頁應用程式網址（以 https://script.google.com/ 開頭）');
+          if (!silent) alert('請輸入正確的 Google Apps Script 網頁應用程式網址（以 https://script.google.com/ 開頭）');
           return;
         }
 
-        setIsLoading(true);
-        setSyncStatus('正在連線並同步雲端資料...');
+        // 若背景靜默同步時正好有寫入在排隊或正在抓資料，跳過本次避免蓋掉本機樂觀狀態
+        if (silent && (activeWriteCountRef.current > 0 || isFetchingRef.current)) {
+          return;
+        }
+
+        isFetchingRef.current = true;
+        if (!silent) {
+          setIsLoading(true);
+          setSyncStatus('正在連線並同步雲端資料...');
+        }
+
         try {
-          const res = await fetch(cleanUrl);
+          const res = await fetch(cleanUrl, { cache: 'no-store' });
           const data = await res.json();
-          if (Array.isArray(data)) {
-            setExhibitions(data);
-            setMediaKpis([]);
-          } else if (data && typeof data === 'object') {
-            setExhibitions(Array.isArray(data.exhibitions) ? data.exhibitions : []);
-            setMediaKpis(Array.isArray(data.mediaKpis) ? data.mediaKpis : []);
+
+          // 若抓取期間使用者剛好按了儲存（產生寫入排隊），放棄套用舊快照，交由智慧合併處理
+          if (activeWriteCountRef.current > 0) {
+            return;
           }
-          setSyncStatus('雲端資料已是最新狀態');
+
+          const parsed = parseCloudPayload(data);
+          const hasChanged =
+            JSON.stringify(parsed.exhibitions) !== JSON.stringify(latestDataRef.current.exhibitions) ||
+            JSON.stringify(parsed.mediaKpis) !== JSON.stringify(latestDataRef.current.mediaKpis);
+
+          if (hasChanged) {
+            setExhibitions(parsed.exhibitions);
+            setMediaKpis(parsed.mediaKpis);
+            setSyncStatus(
+              silent
+                ? `🔄 已自動同步其他同仁最新更新（${formatTimeNow()}）`
+                : `雲端資料已更新（${formatTimeNow()}）`
+            );
+          } else if (!silent) {
+            setSyncStatus(`雲端資料已是最新狀態（${formatTimeNow()}）`);
+          }
         } catch (err) {
           console.error('Fetch error:', err);
-          setSyncStatus('雲端連線失敗，請檢查 API 網址是否正確或權限是否已開啟');
+          if (!silent) {
+            setSyncStatus('雲端連線失敗，請檢查 API 網址是否正確或權限是否已開啟');
+          }
         } finally {
-          setIsLoading(false);
+          isFetchingRef.current = false;
+          if (!silent) {
+            setIsLoading(false);
+          }
         }
       };
 
-      // 儲存資料至 Google Sheet 雲端資料庫
-      const saveCloudData = async (newExhibitions, newKpis = mediaKpis) => {
-        const cleanUrl = (gasUrl || '').trim();
-        if (!cleanUrl) {
-          alert('尚未設定 API 網址，請先貼上 GAS 網址並連線後再進行編輯！');
-          return;
-        }
+      // 🔄 背景每 30 秒自動靜默同步（編輯彈窗開啟或拖曳中自動暫緩，完全不打擾操作）
+      useEffect(() => {
+        if (!gasUrl) return;
 
-        setExhibitions(newExhibitions);
-        setMediaKpis(newKpis);
+        const timer = setInterval(() => {
+          const isUserBusy =
+            isModalOpen ||
+            isKpiModalOpen ||
+            isApiModalOpen ||
+            draggedIndex !== null ||
+            draggedKpiId !== null ||
+            activeWriteCountRef.current > 0 ||
+            document.hidden;
 
-        const payload = {
-          exhibitions: newExhibitions,
-          mediaKpis: newKpis
-        };
+          if (!isUserBusy) {
+            fetchCloudData(gasUrl, { silent: true });
+          }
+        }, AUTO_SYNC_INTERVAL_MS);
 
-        setIsSaving(true);
-        setSyncStatus('正在寫入 Google Sheet 雲端資料庫...');
-        try {
-          await fetch(cleanUrl, {
-            method: 'POST',
-            mode: 'no-cors',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(payload)
-          });
-          setSyncStatus('雲端共編資料庫同步成功！');
-        } catch (err) {
-          console.error('Save error:', err);
-          setSyncStatus('寫入失敗，請稍後再試');
-        } finally {
-          setIsSaving(false);
-        }
-      };
+        return () => clearInterval(timer);
+      }, [gasUrl, isModalOpen, isKpiModalOpen, isApiModalOpen, draggedIndex, draggedKpiId]);
 
       // 儲存並套用 API 網址
       const handleConnectApi = (e) => {
@@ -552,7 +755,10 @@
       const handleDeleteMediaKpi = (id) => {
         if (confirm('確定要刪除此媒體 KPI 追蹤嗎？')) {
           const updatedKpis = mediaKpis.filter(k => k.id !== id);
-          saveCloudData(exhibitions, updatedKpis);
+          enqueueSmartCloudMerge(exhibitions, updatedKpis, {
+            type: 'DELETE_KPI',
+            id
+          });
         }
       };
 
@@ -563,7 +769,7 @@
           return;
         }
         if (kpi) {
-          setEditingKpi(kpi);
+          setEditingKpi(JSON.parse(JSON.stringify(kpi)));
           setKpiForm({
             year: String(kpi.year || kpiSelectedYear),
             name: kpi.name,
@@ -588,23 +794,26 @@
         const targetVal = Number(kpiForm.targetKpi) || 0;
 
         let updatedKpis = [];
+        let savedKpiItem = null;
         if (editingKpi) {
-          updatedKpis = mediaKpis.map(k =>
-            k.id === editingKpi.id
-              ? { ...k, year: cleanYear, name: cleanName, targetKpi: targetVal }
-              : k
-          );
+          savedKpiItem = { ...editingKpi, year: cleanYear, name: cleanName, targetKpi: targetVal };
+          updatedKpis = mediaKpis.map(k => (k.id === editingKpi.id ? savedKpiItem : k));
         } else {
-          const newItem = {
+          savedKpiItem = {
             id: 'KPI-' + Date.now(),
             year: cleanYear,
             name: cleanName,
             targetKpi: targetVal
           };
-          updatedKpis = [...mediaKpis, newItem];
+          updatedKpis = [...mediaKpis, savedKpiItem];
         }
 
-        saveCloudData(exhibitions, updatedKpis);
+        enqueueSmartCloudMerge(exhibitions, updatedKpis, {
+          type: 'UPSERT_KPI',
+          item: savedKpiItem,
+          baseItem: editingKpi
+        });
+
         setKpiSelectedYear(cleanYear);
         setIsKpiSectionExpanded(true);
         setIsKpiModalOpen(false);
@@ -616,7 +825,7 @@
           return;
         }
         if (ex) {
-          setEditingExhibition(ex);
+          setEditingExhibition(JSON.parse(JSON.stringify(ex)));
           setFormData({
             name: ex.name || '',
             department: ex.department || '',
@@ -710,7 +919,12 @@
           updatedList = [...exhibitions, newExhibition];
         }
 
-        saveCloudData(updatedList, mediaKpis);
+        enqueueSmartCloudMerge(updatedList, mediaKpis, {
+          type: 'UPSERT_EXHIBITION',
+          item: newExhibition,
+          baseItem: editingExhibition
+        });
+
         setExhibitionSelectedYear(cleanYear);
         setIsModalOpen(false);
       };
@@ -718,7 +932,10 @@
       const handleDeleteExhibition = (id) => {
         if (confirm('確定要刪除此活動規劃嗎？')) {
           const updatedList = exhibitions.filter(ex => ex.id !== id);
-          saveCloudData(updatedList, mediaKpis);
+          enqueueSmartCloudMerge(updatedList, mediaKpis, {
+            type: 'DELETE_EXHIBITION',
+            id
+          });
         }
       };
 
@@ -1038,7 +1255,7 @@
                     <span>媒體採購與預算整合管理系統</span>
                     {gasUrl ? (
                       <span className="bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 px-1.5 py-0.5 rounded text-[10px]">
-                        ☁️ Google Sheet 已連線
+                        ☁️ 智慧合併共編中
                       </span>
                     ) : (
                       <span className="bg-amber-500/20 text-amber-300 border border-amber-500/30 px-1.5 py-0.5 rounded text-[10px]">
@@ -1107,7 +1324,7 @@
                   <>
                     <button
                       onClick={() => fetchCloudData()}
-                      title="重新從 Google Sheet 抓取最新共編資料"
+                      title="立即從 Google Sheet 抓取最新共編資料（系統亦每 30 秒自動背景同步）"
                       className="bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 px-2.5 py-1.5 rounded-lg text-xs font-medium flex items-center space-x-1"
                     >
                       <span>🔄</span>
@@ -1123,9 +1340,12 @@
             </div>
 
             {/* 即時連線狀態標示條 */}
-            <div className="bg-slate-800/80 px-4 py-1 text-[11px] text-slate-300 flex justify-between items-center border-t border-slate-800">
+            <div className="bg-slate-800/80 px-4 py-1 text-[11px] text-slate-300 flex flex-wrap justify-between items-center gap-2 border-t border-slate-800">
               <span>雲端狀態：{syncStatus}</span>
-              {isSaving && <span className="text-amber-400 font-bold">⚡ 正在寫入 Google Sheet...</span>}
+              <div className="flex items-center space-x-3">
+                {gasUrl && <span className="text-slate-400 hidden sm:inline">⏱️ 每 30 秒自動靜默同步</span>}
+                {isSaving && <span className="text-amber-400 font-bold">⚡ 背景比對合併寫入中...</span>}
+              </div>
             </div>
           </header>
 
